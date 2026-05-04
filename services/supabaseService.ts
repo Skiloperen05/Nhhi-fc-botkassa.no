@@ -1,8 +1,8 @@
 
 import { createClient, RealtimeChannel } from '@supabase/supabase-js';
 
-const SUPABASE_URL = 'https://wcvkrhjyubuzngsswbea.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjdmtyaGp5dWJ1em5nc3N3YmVhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODQyNjE3NCwiZXhwIjoyMDg0MDAyMTc0fQ.tpNSfhRXpnnmkuBjhwh-srSEgQkjKg15_j_P9RttcJM';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY as string;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
