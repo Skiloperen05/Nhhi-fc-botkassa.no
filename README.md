@@ -8,7 +8,7 @@ Det offisielle bøtesystemet for NHHI FC – tilgjengelig på [nhhi-fc-botkassa.
 - **Bygg:** Vite
 - **Styling:** Tailwind CSS
 - **Backend:** Supabase (sanntidssynkronisering)
-- **AI:** Google Gemini
+- **Bot-kommentarer:** Lokalt kommentarbibliotek uten betalt AI-API
 
 ---
 
@@ -27,9 +27,8 @@ Det offisielle bøtesystemet for NHHI FC – tilgjengelig på [nhhi-fc-botkassa.
    ```
 
 3. Fyll inn nøklene i `.env.local`:
-   - `GEMINI_API_KEY` – fra [Google AI Studio](https://aistudio.google.com)
    - `VITE_SUPABASE_URL` – fra Supabase-prosjektets innstillinger
-   - `VITE_SUPABASE_KEY` – service role-nøkkel fra Supabase
+   - `VITE_SUPABASE_KEY` – publishable key eller legacy anon key fra Supabase
 
 4. Start utviklingsserveren:
    ```bash
@@ -47,7 +46,6 @@ Appen deployes automatisk til GitHub Pages ved push til `main`.
 **Oppsett (én gang):**
 
 1. Gå til repoets **Settings → Secrets and variables → Actions** og legg til:
-   - `GEMINI_API_KEY`
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_KEY`
 

@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { Player, PresetFine, FineEntry } from '../types';
 import { Button } from './Button';
-import { generateRoast } from '../services/geminiService';
-import { Check, Loader2, Sparkles, User, FileText, Banknote, Calendar, BellRing } from 'lucide-react';
+import { generateFineComment } from '../services/commentService';
+import { Sparkles, FileText, Banknote } from 'lucide-react';
 import { PlayerSelect } from './PlayerSelect';
 
 interface AddFineViewProps {
@@ -18,26 +18,18 @@ export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, pr
   const [category, setCategory] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [isGenerating, setIsGenerating] = useState(false);
 
   const handlePresetClick = (preset: PresetFine) => {
     setAmount(preset.amount);
     setCategory(preset.label);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPlayerId || amount <= 0 || !category) return;
-
-    setIsGenerating(true);
     
     const player = players.find(p => p.id === selectedPlayerId);
-    let aiComment = '';
-    
-    // Generate AI roast
-    if (player) {
-      aiComment = await generateRoast(player.name, category, description, amount);
-    }
+    const aiComment = player ? generateFineComment(player.name, category, description, amount) : '';
 
     const newFine: FineEntry = {
       id: crypto.randomUUID(),
@@ -58,7 +50,6 @@ export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, pr
     setAmount(0);
     setCategory('');
     setDescription('');
-    setIsGenerating(false);
   };
 
   return (
@@ -159,20 +150,11 @@ export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, pr
           <Button 
             type="submit" 
             fullWidth 
-            disabled={isGenerating || !selectedPlayerId || amount <= 0 || !category}
+            disabled={!selectedPlayerId || amount <= 0 || !category}
             className="mt-6"
           >
-            {isGenerating ? (
-              <>
-                <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5" />
-                Behandler bot...
-              </>
-            ) : (
-              <>
-                <Sparkles className="-ml-1 mr-2 h-5 w-5" />
-                Gi bot
-              </>
-            )}
+            <Sparkles className="-ml-1 mr-2 h-5 w-5" />
+            Gi bot
           </Button>
         </form>
       </div>
