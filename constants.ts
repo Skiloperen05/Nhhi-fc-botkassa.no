@@ -63,6 +63,10 @@ export const DEFAULT_PLAYERS: Player[] = [
   { id: 'p35', name: 'Trygve Sundstrøm', position: 'Spiller', systemRole: 'user', email: 'trksund@gmail.com' },
   { id: 'p36', name: 'Trym Jacobsen', position: 'Spiller', systemRole: 'user', phone: '+4794858210' },
   { id: 'p37', name: 'William Onstad', position: 'Spiller', systemRole: 'user' },
+  { id: 'p38', name: 'Joakim Fyhn', position: 'Spiller', systemRole: 'user' },
+  { id: 'p39', name: 'Martin Aarthun', position: 'Spiller', systemRole: 'user' },
+  { id: 'p40', name: 'Mathias Seljeseth', position: 'Spiller', systemRole: 'user' },
+  { id: 'p41', name: 'Ola Hovde', position: 'Spiller', systemRole: 'user' },
 ];
 
 export const PRESET_FINES: PresetFine[] = [
