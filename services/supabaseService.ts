@@ -1,8 +1,19 @@
 
 import { createClient, RealtimeChannel } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY as string;
+const ACTIVE_SUPABASE_URL = 'https://qnwjhheoekpqqqhevztw.supabase.co';
+const ACTIVE_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_RqAMOlXY2TK012WTAyw3Yw_Js1VYXpz';
+
+const SUPABASE_URL = ACTIVE_SUPABASE_URL;
+const SUPABASE_KEY = ACTIVE_SUPABASE_PUBLISHABLE_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  throw new Error('Supabase mangler VITE_SUPABASE_URL eller VITE_SUPABASE_PUBLISHABLE_KEY.');
+}
+
+if (SUPABASE_KEY.startsWith('sb_secret_')) {
+  throw new Error('Supabase secret key kan ikke brukes i nettleseren. Bruk en publishable key.');
+}
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 

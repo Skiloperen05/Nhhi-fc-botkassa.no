@@ -26,9 +26,9 @@ Det offisielle bøtesystemet for NHHI FC – tilgjengelig på [nhhi-fc-botkassa.
    cp .env.example .env.local
    ```
 
-3. Fyll inn nøklene i `.env.local`:
+3. Fyll inn nøklene i `.env.local` hvis du skal overstyre standardoppsettet:
    - `VITE_SUPABASE_URL` – fra Supabase-prosjektets innstillinger
-   - `VITE_SUPABASE_KEY` – publishable key eller legacy anon key fra Supabase
+   - `VITE_SUPABASE_PUBLISHABLE_KEY` – publishable key fra Supabase
 
 4. Start utviklingsserveren:
    ```bash
@@ -47,7 +47,7 @@ Appen deployes automatisk til GitHub Pages ved push til `main`.
 
 1. Gå til repoets **Settings → Secrets and variables → Actions** og legg til:
    - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_KEY`
+   - `VITE_SUPABASE_PUBLISHABLE_KEY`
 
 2. Gå til **Settings → Pages** og velg **GitHub Actions** som kilde.
 
