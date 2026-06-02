@@ -66,7 +66,6 @@ export const DEFAULT_PLAYERS: Player[] = [
   { id: 'p38', name: 'Joakim Fyhn', position: 'Spiller', systemRole: 'user' },
   { id: 'p39', name: 'Martin Aarthun', position: 'Spiller', systemRole: 'user' },
   { id: 'p40', name: 'Mathias Seljeseth', position: 'Spiller', systemRole: 'user' },
-  { id: 'p41', name: 'Ola Hovde', position: 'Spiller', systemRole: 'user' },
 ];
 
 export const PRESET_FINES: PresetFine[] = [
