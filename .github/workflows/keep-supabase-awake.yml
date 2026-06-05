@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   ping:
@@ -30,3 +30,21 @@ jobs:
             -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_PUBLISHABLE_KEY" \
             > /dev/null
+
+      - name: Check out repository for monthly keepalive commit
+        if: github.event_name == 'schedule'
+        uses: actions/checkout@v4
+
+      - name: Keep scheduled workflow enabled
+        if: github.event_name == 'schedule'
+        run: |
+          if [ "$(date -u +%d)" != "01" ] || [ "$(date -u +%H)" != "06" ]; then
+            exit 0
+          fi
+
+          date -u +%Y-%m-%dT%H:%M:%SZ > .github/keep-supabase-awake.last-run
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/keep-supabase-awake.last-run
+          git commit -m "Keep Supabase wakeup workflow enabled" || exit 0
+          git push
