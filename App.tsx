@@ -18,6 +18,76 @@ import { storage } from './services/storageService';
 import { cloudSave, cloudDelete, cloudFetchAll, subscribeToCloudChanges, cloudSaveBulk } from './services/supabaseService';
 import { PlusCircle, BarChart3, Shield, Table, LogOut, Bell, Settings, Search, Loader2, CheckCircle2, Cloud, AlertTriangle, Mail } from 'lucide-react';
 
+const INVALID_LEGACY_PLAYER_IDS = new Set(['p39', 'p40', 'p41']);
+const ACCOUNT_MIGRATION_VERSION = 1;
+
+const normalizeName = (name: string) => ({
+  'Jakob Solhaug Sørum': 'Jakob Sørum',
+  'Jonas Kristiansen': 'Jonas Landsem Kristiansen',
+  'Njål Osmundsen': 'Njål Sondre Osmundsen',
+  'Martin Devik': 'Martin Leganger Devik',
+}[name] || name);
+
+const canonicalPlayerByName = (name: string) =>
+  DEFAULT_PLAYERS.find(player => player.name === normalizeName(name));
+
+const repairPlayerAccounts = (storedPlayers: Player[], storedUser: User | null): Player[] => {
+  const storedById = new Map(storedPlayers.map(player => [player.id, player]));
+  const namesAlreadyCanonical = DEFAULT_PLAYERS.every(player => {
+    const stored = storedById.get(player.id);
+    return !stored || stored.name === player.name;
+  });
+  const sessionIsShifted = Boolean(
+    storedUser && canonicalPlayerByName(storedUser.name)?.id !== storedUser.id
+  );
+  const adminRolesAreShifted =
+    storedById.get('p1')?.systemRole === 'admin' ||
+    storedById.get('p4')?.systemRole === 'admin';
+  const canonicalAccountsAreShifted = namesAlreadyCanonical && (sessionIsShifted || adminRolesAreShifted);
+
+  const repairedCanonical = DEFAULT_PLAYERS.map(canonical => {
+    const source = canonicalAccountsAreShifted
+      ? storedById.get(`p${Number(canonical.id.slice(1)) - 1}`)
+      : namesAlreadyCanonical
+        ? storedById.get(canonical.id)
+        : storedPlayers.find(player => canonicalPlayerByName(player.name)?.id === canonical.id);
+
+    return {
+      ...canonical,
+      password: source?.password,
+      hasChangedPassword: source?.hasChangedPassword,
+    };
+  });
+
+  const customPlayers = storedPlayers.filter(player =>
+    !INVALID_LEGACY_PLAYER_IDS.has(player.id) &&
+    !DEFAULT_PLAYERS.some(canonical => canonical.id === player.id)
+  );
+
+  return [...repairedCanonical, ...customPlayers];
+};
+
+const normalizePlayerIdentities = (players: Player[]): Player[] => {
+  const byId = new Map(players.map(player => [player.id, player]));
+  const canonical = DEFAULT_PLAYERS.map(player => ({
+    ...byId.get(player.id),
+    ...player,
+    password: byId.get(player.id)?.password,
+    hasChangedPassword: byId.get(player.id)?.hasChangedPassword,
+  }));
+  const custom = players.filter(player =>
+    !INVALID_LEGACY_PLAYER_IDS.has(player.id) &&
+    !DEFAULT_PLAYERS.some(canonicalPlayer => canonicalPlayer.id === player.id)
+  );
+  return [...canonical, ...custom];
+};
+
+const repairSession = (user: User | null): User | null => {
+  if (!user) return null;
+  const canonical = canonicalPlayerByName(user.name);
+  return canonical ? { id: canonical.id, name: canonical.name, role: canonical.systemRole } : user;
+};
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [view, setView] = useState<ViewState>('login');
@@ -46,7 +116,7 @@ const App: React.FC = () => {
   const lastLocalSaveRef = useRef<number>(0);
 
   useEffect(() => {
-    const loadedUser = storage.get<User | null>('session_user', null);
+    const storedUser = storage.get<User | null>('session_user', null);
     const loadedFines = storage.get<FineEntry[]>('fines', []);
     const loadedArchived = storage.get<FineEntry[]>('archived_fines', []);
     const loadedMessages = storage.get<Message[]>('messages', []);
@@ -56,11 +126,14 @@ const App: React.FC = () => {
     const loadedRules = storage.get<string>('global_rules', '');
     
     const storedPlayers = storage.get<Player[]>('players', []);
-    const playerMap = new Map<string, Player>();
-    DEFAULT_PLAYERS.forEach(p => playerMap.set(p.id, p));
-    storedPlayers.forEach(p => playerMap.set(p.id, p));
-    
-    const finalPlayers = Array.from(playerMap.values());
+    const migrationVersion = storage.get<number>('account_migration_version', 0);
+    const finalPlayers = migrationVersion < ACCOUNT_MIGRATION_VERSION && storedPlayers.length > 0
+      ? repairPlayerAccounts(storedPlayers, storedUser)
+      : normalizePlayerIdentities(storedPlayers);
+    const loadedUser = repairSession(storedUser);
+    storage.save('players', finalPlayers);
+    storage.save('account_migration_version', ACCOUNT_MIGRATION_VERSION);
+    if (loadedUser) storage.save('session_user', loadedUser);
     setFines(loadedFines);
     setArchivedFines(loadedArchived);
     setMessages(loadedMessages);
@@ -169,10 +242,9 @@ const App: React.FC = () => {
       if (cloudPlayers && cloudPlayers.length > 0) {
           setPlayers(prevLocal => {
             const mergedMap = new Map<string, Player>();
-            DEFAULT_PLAYERS.forEach(p => mergedMap.set(p.id, p));
             prevLocal.forEach(p => mergedMap.set(p.id, p));
             cloudPlayers.forEach(cp => mergedMap.set(cp.id, cp));
-            const final = Array.from(mergedMap.values());
+            const final = normalizePlayerIdentities(Array.from(mergedMap.values()));
             storage.save('players', final);
             return final;
           });
