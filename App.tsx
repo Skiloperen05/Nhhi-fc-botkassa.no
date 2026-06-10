@@ -18,6 +18,28 @@ import { storage } from './services/storageService';
 import { cloudSave, cloudDelete, cloudFetchAll, subscribeToCloudChanges, cloudSaveBulk } from './services/supabaseService';
 import { PlusCircle, BarChart3, Shield, Table, LogOut, Bell, Settings, Search, Loader2, CheckCircle2, Cloud, AlertTriangle, Mail } from 'lucide-react';
 
+const INVALID_LEGACY_PLAYER_IDS = new Set(['p39', 'p40']);
+
+const normalizePlayers = (...playerLists: Player[][]): Player[] => {
+  const merged = new Map<string, Player>();
+
+  playerLists.flat().forEach(player => {
+    if (!INVALID_LEGACY_PLAYER_IDS.has(player.id)) merged.set(player.id, player);
+  });
+
+  DEFAULT_PLAYERS.forEach(canonicalPlayer => {
+    const existing = merged.get(canonicalPlayer.id);
+    merged.set(canonicalPlayer.id, {
+      ...canonicalPlayer,
+      ...existing,
+      id: canonicalPlayer.id,
+      name: canonicalPlayer.name,
+    });
+  });
+
+  return Array.from(merged.values());
+};
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [view, setView] = useState<ViewState>('login');
@@ -56,11 +78,8 @@ const App: React.FC = () => {
     const loadedRules = storage.get<string>('global_rules', '');
     
     const storedPlayers = storage.get<Player[]>('players', []);
-    const playerMap = new Map<string, Player>();
-    DEFAULT_PLAYERS.forEach(p => playerMap.set(p.id, p));
-    storedPlayers.forEach(p => playerMap.set(p.id, p));
-    
-    const finalPlayers = Array.from(playerMap.values());
+    const finalPlayers = normalizePlayers(storedPlayers);
+    storage.save('players', finalPlayers);
     setFines(loadedFines);
     setArchivedFines(loadedArchived);
     setMessages(loadedMessages);
@@ -168,11 +187,7 @@ const App: React.FC = () => {
 
       if (cloudPlayers && cloudPlayers.length > 0) {
           setPlayers(prevLocal => {
-            const mergedMap = new Map<string, Player>();
-            DEFAULT_PLAYERS.forEach(p => mergedMap.set(p.id, p));
-            prevLocal.forEach(p => mergedMap.set(p.id, p));
-            cloudPlayers.forEach(cp => mergedMap.set(cp.id, cp));
-            const final = Array.from(mergedMap.values());
+            const final = normalizePlayers(prevLocal, cloudPlayers);
             storage.save('players', final);
             return final;
           });
@@ -621,7 +636,14 @@ const App: React.FC = () => {
           onAddPlayer={handleAddPlayer} onRemovePlayer={handleRemovePlayer} onToggleAdmin={handleToggleAdmin}
           onAddPresetFine={handleAddPresetFine} onRemovePresetFine={handleRemovePresetFine}
           onAddRole={handleAddRole} onRemoveRole={handleRemoveRole}
-          onImportData={(d) => { if(d.fines) setFines(d.fines); if(d.players) setPlayers(d.players); }} 
+          onImportData={(d) => {
+            if (d.fines) setFines(d.fines);
+            if (d.players) {
+              const normalized = normalizePlayers(d.players);
+              storage.save('players', normalized);
+              setPlayers(normalized);
+            }
+          }}
           exportData={{fines: [...fines, ...archivedFines], players, roles, presets: presetFines}} 
         />
       )}
