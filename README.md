@@ -78,9 +78,11 @@ Eksisterende spiller-ID-er, passord, roller og historikk beholdes. Fødselsdatoe
 og adresser fra regnearket importeres ikke.
 
 Tidligere medlemmer beholdes i `LEGACY_PLAYERS` med `isActive: false`.
-Appen skjuler dem og deres bøter i visningene, men beholder komplette data i
-lagring, synkronisering og regnskapseksport. «Skjul» i spillerinnstillingene
-bruker samme flagg. Legger du til samme navn igjen, aktiveres den eksisterende
-kontoen med samme ID og historikk.
+Appen skjuler dem fra spillerlisten, innlogging og valg av mottakere. Alle bøter,
+betalinger og kommentarer vises fortsatt i historikken og inngår i totalsummene,
+også for tidligere medlemmer. Historiske profiler kan åpnes fra bøter og statistikk.
+Komplette data beholdes i lagring, synkronisering og regnskapseksport. «Skjul» i
+spillerinnstillingene bruker samme flagg. Legger du til samme navn igjen, aktiveres
+den eksisterende kontoen med samme ID og historikk.
 
 Kjør `npm run test:players` for å kontrollere at kontoer, passord og ID-er bevares.

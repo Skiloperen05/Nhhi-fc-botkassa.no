@@ -15,6 +15,7 @@ import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { SendMessageModal } from './components/SendMessageModal';
 import { ArchiveView } from './components/ArchiveView';
 import { storage } from './services/storageService';
+import { getFineHistory } from './services/historyService';
 import { cloudSave, cloudDelete, cloudFetchAll, subscribeToCloudChanges, cloudSaveBulk } from './services/supabaseService';
 import { PlusCircle, BarChart3, Shield, Table, LogOut, Bell, Settings, Search, Loader2, CheckCircle2, Cloud, AlertTriangle, Mail } from 'lucide-react';
 
@@ -47,13 +48,10 @@ const App: React.FC = () => {
 
   const lastLocalSaveRef = useRef<number>(0);
 
-  // Keep full records in state/storage; membership only controls what is shown.
+  // Membership controls roster choices; every fine remains in history and totals.
   const activePlayers = useMemo(() => players.filter(isPlayerActive).sort((a, b) => a.name.localeCompare(b.name, 'nb')), [players]);
-  const activePlayerIds = useMemo(() => new Set(activePlayers.map(p => p.id)), [activePlayers]);
   const hiddenPlayerIds = useMemo(() => new Set(players.filter(p => !isPlayerActive(p)).map(p => p.id)), [players]);
-  const visibleFines = useMemo(() => [...fines, ...archivedFines].filter(f => activePlayerIds.has(f.playerId)), [fines, archivedFines, activePlayerIds]);
-  const visibleArchive = useMemo(() => archivedFines.filter(f => activePlayerIds.has(f.playerId)), [archivedFines, activePlayerIds]);
-  const visibleMessages = useMemo(() => messages.filter(m => !hiddenPlayerIds.has(m.senderId) && !hiddenPlayerIds.has(m.recipientId)), [messages, hiddenPlayerIds]);
+  const historyFines = useMemo(() => getFineHistory(fines, archivedFines), [fines, archivedFines]);
 
   useEffect(() => {
     if (user && hiddenPlayerIds.has(user.id)) {
@@ -465,7 +463,7 @@ const App: React.FC = () => {
 
   const headerStats = useMemo(() => {
     const uniqueFinesMap = new Map<string, FineEntry>();
-    visibleFines.forEach(f => uniqueFinesMap.set(f.id, f));
+    historyFines.forEach(f => uniqueFinesMap.set(f.id, f));
     const allUniqueFines = Array.from(uniqueFinesMap.values());
     
     const targetFines = user?.role === 'admin' ? allUniqueFines : allUniqueFines.filter(f => f.playerId === user?.id);
@@ -475,7 +473,7 @@ const App: React.FC = () => {
     const percent = total > 0 ? Math.round((paid / total) * 100) : 0;
     
     return { debt, paid, total, percent };
-  }, [user, visibleFines]);
+  }, [user, historyFines]);
 
   if (isLoading) {
     return (
@@ -486,8 +484,8 @@ const App: React.FC = () => {
     );
   }
 
-  const currentSelectedFine = visibleFines.find(f => f.id === selectedFineId);
-  const currentSelectedPlayer = activePlayers.find(p => p.id === (selectedPlayerId || user?.id));
+  const currentSelectedFine = historyFines.find(f => f.id === selectedFineId);
+  const currentSelectedPlayer = players.find(p => p.id === (selectedPlayerId || user?.id));
 
   const getFineDetailPlayer = (fine: FineEntry) => {
       const p = players.find(x => x.id === fine.playerId);
@@ -586,15 +584,14 @@ const App: React.FC = () => {
             </div>
         ) : (
             view === 'add' ? <AddFineView onAddFine={saveFine} players={activePlayers} presetFines={presetFines} /> :
-            view === 'overview' ? <StatsView fines={visibleFines} players={activePlayers} onSelectPlayer={(id) => { setSelectedPlayerId(id); setView('player'); }} currentFilter={filter} onFilterChange={setFilter} currentUserRole={user.role} /> :
-            view === 'list' ? <FineListView fines={visibleFines} players={activePlayers} currentFilter={filter} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} currentUserRole={user.role} /> :
-            view === 'notifications' ? <NotificationsView user={user} fines={visibleFines} messages={visibleMessages} players={activePlayers} /> :
-            view === 'archive' ? <ArchiveView fines={visibleArchive} players={activePlayers} onBack={() => setView('player')} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} /> :
+            view === 'overview' ? <StatsView fines={historyFines} players={players} onSelectPlayer={(id) => { setSelectedPlayerId(id); setView('player'); }} currentFilter={filter} onFilterChange={setFilter} currentUserRole={user.role} /> :
+            view === 'list' ? <FineListView fines={historyFines} players={players} currentFilter={filter} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} currentUserRole={user.role} /> :
+            view === 'notifications' ? <NotificationsView user={user} fines={historyFines} messages={messages} players={players} /> :
+            view === 'archive' ? <ArchiveView fines={archivedFines} players={players} onBack={() => setView('player')} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} /> :
             view === 'fine_detail' ? (
                 currentSelectedFine ? (
                     <FineDetailView 
                         fine={currentSelectedFine} 
-                        hiddenPlayerIds={hiddenPlayerIds}
                         player={getFineDetailPlayer(currentSelectedFine)} 
                         currentUser={user} 
                         presetFines={presetFines} 
@@ -617,12 +614,12 @@ const App: React.FC = () => {
                         currentUserRole={user.role} 
                         currentUserId={user.id}
                         isOwnProfile={user.id === currentSelectedPlayer.id} 
-                        fines={visibleFines.filter(f => f.playerId === currentSelectedPlayer.id)}
-                        allFines={visibleFines}
+                        fines={historyFines.filter(f => f.playerId === currentSelectedPlayer.id)}
+                        allFines={historyFines}
                         settings={settings[currentSelectedPlayer.id] || { pushEnabled: false }} 
                         presetFines={presetFines} 
                         roles={roles} 
-                        players={activePlayers}
+                        players={players}
                         onUpdateSettings={handleUpdateSettings} 
                         onUpdatePlayer={handleUpdatePlayer} 
                         onBack={() => user.role === 'admin' ? setView('overview') : setView('list')} 

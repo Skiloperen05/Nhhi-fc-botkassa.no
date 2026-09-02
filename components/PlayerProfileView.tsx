@@ -207,6 +207,9 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                 <User className="w-10 h-10" />
             </div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight">{player.name}</h1>
+            {player.isActive === false && (
+                <p className="mt-1 text-xs text-slate-500">Tidligere medlem</p>
+            )}
             
             <div className="flex items-center justify-center mt-2 mb-2 flex-wrap gap-2">
                 <span className="text-slate-500 text-[10px] font-black uppercase tracking-widest">

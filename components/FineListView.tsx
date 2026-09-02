@@ -274,6 +274,9 @@ export const FineListView: React.FC<FineListViewProps> = ({ fines, currentFilter
                         <div className={`truncate ${!player ? 'text-red-400 italic font-normal' : ''}`} title={player?.name || 'Spiller slettet'}>
                             {displayName}
                         </div>
+                        {player?.isActive === false && (
+                            <div className="text-[9px] font-normal text-slate-400">Tidligere medlem</div>
+                        )}
                     </td>
                     
                     <td className="px-2 sm:px-4 py-3 text-slate-600 align-top">

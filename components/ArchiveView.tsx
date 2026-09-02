@@ -65,6 +65,9 @@ export const ArchiveView: React.FC<ArchiveViewProps> = ({ fines, players, onBack
                                       <div className="overflow-hidden">
                                           <div className="text-[10px] text-slate-400 font-black uppercase mb-1">{new Date(f.date).toLocaleDateString()}</div>
                                           <div className="text-sm font-bold text-slate-900 truncate">{p?.name || 'Ukjent spiller'}</div>
+                                          {p?.isActive === false && (
+                                              <div className="text-[10px] text-slate-400">Tidligere medlem</div>
+                                          )}
                                           <div className="text-xs text-slate-500 truncate">{f.reason}</div>
                                       </div>
                                       <div className="text-right shrink-0 ml-4">

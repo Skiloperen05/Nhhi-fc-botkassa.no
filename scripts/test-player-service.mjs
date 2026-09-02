@@ -19,6 +19,7 @@ try {
   const compileStatus = runNode([
     compiler,
     'tests/playerService.test.ts',
+    'tests/historyService.test.ts',
     '--module', 'commonjs',
     '--moduleResolution', 'node',
     '--target', 'es2022',
@@ -27,7 +28,9 @@ try {
     '--outDir', outputDir,
   ]);
   process.exitCode = compileStatus || runNode([
-    '--test', join(outputDir, 'tests', 'playerService.test.js'),
+    '--test',
+    join(outputDir, 'tests', 'playerService.test.js'),
+    join(outputDir, 'tests', 'historyService.test.js'),
   ]);
 } finally {
   rmSync(outputDir, { recursive: true, force: true });
