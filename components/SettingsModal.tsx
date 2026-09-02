@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Button } from './Button';
 import { UserSettings, User, Player, PresetFine, RoleDefinition, FineEntry } from '../types';
-import { X, Smartphone, Save, UploadCloud, RefreshCw, Plus, Trash2, ShieldCheck, Lock, KeyRound, CheckCircle2, AlertCircle, BookOpen, Edit3, Download, FileSpreadsheet, Calendar as CalendarIcon, ChevronRight } from 'lucide-react';
+import { X, Smartphone, Save, UploadCloud, RefreshCw, Plus, Trash2, EyeOff, ShieldCheck, Lock, KeyRound, CheckCircle2, AlertCircle, BookOpen, Edit3, Download, FileSpreadsheet, Calendar as CalendarIcon, ChevronRight } from 'lucide-react';
 import { ROLE_COLOR_MAP } from '../constants';
 
 interface SettingsModalProps {
@@ -19,7 +19,7 @@ interface SettingsModalProps {
   isSyncing: boolean;
   onCancel: () => void;
   onAddPlayer?: (name: string, position: string) => void;
-  onRemovePlayer?: (id: string) => void;
+  onHidePlayer?: (id: string) => void;
   onToggleAdmin?: (playerId: string) => void;
   onAddPresetFine?: (label: string, amount: number, icon: string) => void;
   onRemovePresetFine?: (id: string) => void;
@@ -55,7 +55,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isSyncing,
   onCancel, 
   onAddPlayer,
-  onRemovePlayer,
+  onHidePlayer,
   onToggleAdmin,
   onAddPresetFine,
   onRemovePresetFine,
@@ -361,7 +361,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
 
             <div className="space-y-2 max-h-none overflow-visible">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Alle spillere ({players.length})</h4>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Aktive spillere ({players.length})</h4>
                 {sortedPlayers.map(p => {
                     const isBirk = p.name === 'Birk Haugnes';
                     return (
@@ -387,10 +387,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 )}
                                 {(!isBirk || (isSuperAdmin && isBirk)) && (
                                     <button 
-                                        onClick={() => { if(confirm(`Slette ${p.name}?`)) onRemovePlayer && onRemovePlayer(p.id); }}
-                                        className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                        onClick={() => { if(confirm(`Skjule ${p.name} i appen? Brukerkontoen og all historikk blir beholdt.`)) onHidePlayer && onHidePlayer(p.id); }}
+                                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+                                        title={`Skjul ${p.name}`}
+                                        aria-label={`Skjul ${p.name}`}
                                     >
-                                        <Trash2 size={18} />
+                                        <EyeOff size={18} />
                                     </button>
                                 )}
                             </div>

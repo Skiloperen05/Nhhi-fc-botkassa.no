@@ -11,6 +11,7 @@ interface FineDetailViewProps {
   player: Player;
   currentUser?: { id: string; name: string; role: string };
   presetFines: PresetFine[];
+  hiddenPlayerIds?: ReadonlySet<string>;
   onBack: () => void;
   onGoToProfile: (playerId: string) => void;
   onAddComment: (fineId: string, text: string) => void;
@@ -100,6 +101,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
   player, 
   currentUser, 
   presetFines,
+  hiddenPlayerIds,
   onBack, 
   onGoToProfile, 
   onAddComment,
@@ -113,6 +115,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
   const [commentText, setCommentText] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [showComplaintModal, setShowComplaintModal] = useState(false);
+  const visibleComments = (fine.comments || []).filter(comment => !hiddenPlayerIds?.has(comment.userId));
   
   const isPaid = fine.status === 'paid';
   const isAdmin = currentUser?.role === 'admin';
@@ -294,8 +297,8 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
 
             {/* List */}
             <div className="space-y-4 mb-6 max-h-60 overflow-y-auto no-scrollbar">
-                {fine.comments && fine.comments.length > 0 ? (
-                    fine.comments.map(comment => (
+                {visibleComments.length > 0 ? (
+                    visibleComments.map(comment => (
                         <div key={comment.id} className="flex gap-3 text-left group relative">
                             <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-500 shrink-0">
                                 {comment.userName.charAt(0)}

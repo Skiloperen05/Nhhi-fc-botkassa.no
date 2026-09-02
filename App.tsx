@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ViewState, FineEntry, User, TimeFilter, UserSettings, Player, PresetFine, RoleDefinition, Message } from './types';
-import { DEFAULT_PLAYERS, PRESET_FINES as DEFAULT_PRESET_FINES, DEFAULT_ROLES } from './constants';
+import { PRESET_FINES as DEFAULT_PRESET_FINES, DEFAULT_ROLES } from './constants';
 import { AddFineView } from './components/AddFineView';
 import { StatsView } from './components/StatsView';
 import { PlayerProfileView } from './components/PlayerProfileView';
@@ -18,75 +18,7 @@ import { storage } from './services/storageService';
 import { cloudSave, cloudDelete, cloudFetchAll, subscribeToCloudChanges, cloudSaveBulk } from './services/supabaseService';
 import { PlusCircle, BarChart3, Shield, Table, LogOut, Bell, Settings, Search, Loader2, CheckCircle2, Cloud, AlertTriangle, Mail } from 'lucide-react';
 
-const INVALID_LEGACY_PLAYER_IDS = new Set(['p39', 'p40', 'p41']);
-const ACCOUNT_MIGRATION_VERSION = 1;
-
-const normalizeName = (name: string) => ({
-  'Jakob Solhaug Sørum': 'Jakob Sørum',
-  'Jonas Kristiansen': 'Jonas Landsem Kristiansen',
-  'Njål Osmundsen': 'Njål Sondre Osmundsen',
-  'Martin Devik': 'Martin Leganger Devik',
-}[name] || name);
-
-const canonicalPlayerByName = (name: string) =>
-  DEFAULT_PLAYERS.find(player => player.name === normalizeName(name));
-
-const repairPlayerAccounts = (storedPlayers: Player[], storedUser: User | null): Player[] => {
-  const storedById = new Map(storedPlayers.map(player => [player.id, player]));
-  const namesAlreadyCanonical = DEFAULT_PLAYERS.every(player => {
-    const stored = storedById.get(player.id);
-    return !stored || stored.name === player.name;
-  });
-  const sessionIsShifted = Boolean(
-    storedUser && canonicalPlayerByName(storedUser.name)?.id !== storedUser.id
-  );
-  const adminRolesAreShifted =
-    storedById.get('p1')?.systemRole === 'admin' ||
-    storedById.get('p4')?.systemRole === 'admin';
-  const canonicalAccountsAreShifted = namesAlreadyCanonical && (sessionIsShifted || adminRolesAreShifted);
-
-  const repairedCanonical = DEFAULT_PLAYERS.map(canonical => {
-    const source = canonicalAccountsAreShifted
-      ? storedById.get(`p${Number(canonical.id.slice(1)) - 1}`)
-      : namesAlreadyCanonical
-        ? storedById.get(canonical.id)
-        : storedPlayers.find(player => canonicalPlayerByName(player.name)?.id === canonical.id);
-
-    return {
-      ...canonical,
-      password: source?.password,
-      hasChangedPassword: source?.hasChangedPassword,
-    };
-  });
-
-  const customPlayers = storedPlayers.filter(player =>
-    !INVALID_LEGACY_PLAYER_IDS.has(player.id) &&
-    !DEFAULT_PLAYERS.some(canonical => canonical.id === player.id)
-  );
-
-  return [...repairedCanonical, ...customPlayers];
-};
-
-const normalizePlayerIdentities = (players: Player[]): Player[] => {
-  const byId = new Map(players.map(player => [player.id, player]));
-  const canonical = DEFAULT_PLAYERS.map(player => ({
-    ...byId.get(player.id),
-    ...player,
-    password: byId.get(player.id)?.password,
-    hasChangedPassword: byId.get(player.id)?.hasChangedPassword,
-  }));
-  const custom = players.filter(player =>
-    !INVALID_LEGACY_PLAYER_IDS.has(player.id) &&
-    !DEFAULT_PLAYERS.some(canonicalPlayer => canonicalPlayer.id === player.id)
-  );
-  return [...canonical, ...custom];
-};
-
-const repairSession = (user: User | null): User | null => {
-  if (!user) return null;
-  const canonical = canonicalPlayerByName(user.name);
-  return canonical ? { id: canonical.id, name: canonical.name, role: canonical.systemRole } : user;
-};
+import { ACCOUNT_MIGRATION_VERSION, isPlayerActive, normalizeName, normalizePlayerIdentities, repairPlayerAccounts, repairSession } from './services/playerService';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -115,6 +47,27 @@ const App: React.FC = () => {
 
   const lastLocalSaveRef = useRef<number>(0);
 
+  // Keep full records in state/storage; membership only controls what is shown.
+  const activePlayers = useMemo(() => players.filter(isPlayerActive).sort((a, b) => a.name.localeCompare(b.name, 'nb')), [players]);
+  const activePlayerIds = useMemo(() => new Set(activePlayers.map(p => p.id)), [activePlayers]);
+  const hiddenPlayerIds = useMemo(() => new Set(players.filter(p => !isPlayerActive(p)).map(p => p.id)), [players]);
+  const visibleFines = useMemo(() => [...fines, ...archivedFines].filter(f => activePlayerIds.has(f.playerId)), [fines, archivedFines, activePlayerIds]);
+  const visibleArchive = useMemo(() => archivedFines.filter(f => activePlayerIds.has(f.playerId)), [archivedFines, activePlayerIds]);
+  const visibleMessages = useMemo(() => messages.filter(m => !hiddenPlayerIds.has(m.senderId) && !hiddenPlayerIds.has(m.recipientId)), [messages, hiddenPlayerIds]);
+
+  useEffect(() => {
+    if (user && hiddenPlayerIds.has(user.id)) {
+      setUser(null);
+      storage.remove('session_user');
+      setView('login');
+      setSelectedPlayerId(null);
+      setMustChangePassword(false);
+      setShowSettingsModal(false);
+      setShowSearchModal(false);
+      setShowSendMessageModal(false);
+    }
+  }, [user, hiddenPlayerIds]);
+
   useEffect(() => {
     const storedUser = storage.get<User | null>('session_user', null);
     const loadedFines = storage.get<FineEntry[]>('fines', []);
@@ -130,10 +83,12 @@ const App: React.FC = () => {
     const finalPlayers = migrationVersion < ACCOUNT_MIGRATION_VERSION && storedPlayers.length > 0
       ? repairPlayerAccounts(storedPlayers, storedUser)
       : normalizePlayerIdentities(storedPlayers);
-    const loadedUser = repairSession(storedUser);
+    const repairedUser = repairSession(storedUser, finalPlayers);
+    const loadedUser = repairedUser && finalPlayers.some(p => p.id === repairedUser.id && isPlayerActive(p)) ? repairedUser : null;
     storage.save('players', finalPlayers);
     storage.save('account_migration_version', ACCOUNT_MIGRATION_VERSION);
     if (loadedUser) storage.save('session_user', loadedUser);
+    else storage.remove('session_user');
     setFines(loadedFines);
     setArchivedFines(loadedArchived);
     setMessages(loadedMessages);
@@ -243,7 +198,7 @@ const App: React.FC = () => {
           setPlayers(prevLocal => {
             const mergedMap = new Map<string, Player>();
             prevLocal.forEach(p => mergedMap.set(p.id, p));
-            cloudPlayers.forEach(cp => mergedMap.set(cp.id, cp));
+            cloudPlayers.forEach(cp => mergedMap.set(cp.id, { ...mergedMap.get(cp.id), ...cp }));
             const final = normalizePlayerIdentities(Array.from(mergedMap.values()));
             storage.save('players', final);
             return final;
@@ -361,7 +316,8 @@ const App: React.FC = () => {
   };
 
   const handleLogin = (u: User) => {
-    const player = players.find(p => p.id === u.id);
+    const player = activePlayers.find(p => p.id === u.id);
+    if (!player) return;
     if (player && !player.hasChangedPassword) setMustChangePassword(true);
     setUser(u);
     storage.save('session_user', u);
@@ -400,16 +356,32 @@ const App: React.FC = () => {
   };
 
   const handleAddPlayer = async (name: string, position: string) => {
-      const newPlayer: Player = { id: crypto.randomUUID(), name, position, systemRole: 'user' };
+      const cleanName = name.trim();
+      const existing = players.find(p => normalizeName(p.name).toLocaleLowerCase('nb') === normalizeName(cleanName).toLocaleLowerCase('nb'));
+      if (existing) {
+        if (isPlayerActive(existing)) { triggerErrorToast('Spilleren finnes allerede'); return; }
+        const restored = { ...existing, isActive: true };
+        if (!await cloudSave('player', restored.id, restored)) { triggerErrorToast('Kunne ikke lagre spilleren'); return; }
+        setPlayers(prev => { const next = prev.map(p => p.id === restored.id ? restored : p); storage.save('players', next); return next; });
+        triggerToast('Eksisterende spiller aktivert igjen');
+        return;
+      }
+      const newPlayer: Player = { id: crypto.randomUUID(), name: cleanName, position, systemRole: 'user', isActive: true };
       setPlayers(prev => { const newList = [...prev, newPlayer]; storage.save('players', newList); return newList; });
       await cloudSave('player', newPlayer.id, newPlayer);
       triggerToast("Spiller lagt til");
   };
 
-  const handleRemovePlayer = async (id: string) => {
-      setPlayers(prev => { const newList = prev.filter(p => p.id !== id); storage.save('players', newList); return newList; });
-      await cloudDelete('player', id);
-      triggerToast("Spiller fjernet");
+  const handleHidePlayer = async (id: string) => {
+      const player = players.find(p => p.id === id);
+      if (!player) return;
+      lastLocalSaveRef.current = Date.now();
+      if (!await cloudSave('player', id, { ...player, isActive: false })) {
+        triggerErrorToast('Kunne ikke skjule spilleren. Prøv igjen.');
+        return;
+      }
+      setPlayers(prev => { const next = prev.map(p => p.id === id ? { ...p, isActive: false } : p); storage.save('players', next); return next; });
+      triggerToast('Spiller skjult. Konto og historikk er beholdt.');
   };
 
   const handleToggleAdmin = async (playerId: string) => {
@@ -493,7 +465,7 @@ const App: React.FC = () => {
 
   const headerStats = useMemo(() => {
     const uniqueFinesMap = new Map<string, FineEntry>();
-    [...fines, ...archivedFines].forEach(f => uniqueFinesMap.set(f.id, f));
+    visibleFines.forEach(f => uniqueFinesMap.set(f.id, f));
     const allUniqueFines = Array.from(uniqueFinesMap.values());
     
     const targetFines = user?.role === 'admin' ? allUniqueFines : allUniqueFines.filter(f => f.playerId === user?.id);
@@ -503,7 +475,7 @@ const App: React.FC = () => {
     const percent = total > 0 ? Math.round((paid / total) * 100) : 0;
     
     return { debt, paid, total, percent };
-  }, [user, fines, archivedFines]);
+  }, [user, visibleFines]);
 
   if (isLoading) {
     return (
@@ -514,8 +486,8 @@ const App: React.FC = () => {
     );
   }
 
-  const currentSelectedFine = [...fines, ...archivedFines].find(f => f.id === selectedFineId);
-  const currentSelectedPlayer = players.find(p => p.id === (selectedPlayerId || user?.id));
+  const currentSelectedFine = visibleFines.find(f => f.id === selectedFineId);
+  const currentSelectedPlayer = activePlayers.find(p => p.id === (selectedPlayerId || user?.id));
 
   const getFineDetailPlayer = (fine: FineEntry) => {
       const p = players.find(x => x.id === fine.playerId);
@@ -610,18 +582,19 @@ const App: React.FC = () => {
       <main className={`px-4 max-w-lg mx-auto ${user ? '-mt-10 relative z-20' : ''}`}>
         {!user ? (
             <div className="mt-20">
-              <LoginView onLogin={handleLogin} players={players} />
+              <LoginView onLogin={handleLogin} players={activePlayers} />
             </div>
         ) : (
-            view === 'add' ? <AddFineView onAddFine={saveFine} players={players} presetFines={presetFines} /> :
-            view === 'overview' ? <StatsView fines={[...fines, ...archivedFines]} players={players} onSelectPlayer={(id) => { setSelectedPlayerId(id); setView('player'); }} currentFilter={filter} onFilterChange={setFilter} currentUserRole={user.role} /> :
-            view === 'list' ? <FineListView fines={[...fines, ...archivedFines]} players={players} currentFilter={filter} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} currentUserRole={user.role} /> :
-            view === 'notifications' ? <NotificationsView user={user} fines={[...fines, ...archivedFines]} messages={messages} players={players} /> :
-            view === 'archive' ? <ArchiveView fines={archivedFines} players={players} onBack={() => setView('player')} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} /> :
+            view === 'add' ? <AddFineView onAddFine={saveFine} players={activePlayers} presetFines={presetFines} /> :
+            view === 'overview' ? <StatsView fines={visibleFines} players={activePlayers} onSelectPlayer={(id) => { setSelectedPlayerId(id); setView('player'); }} currentFilter={filter} onFilterChange={setFilter} currentUserRole={user.role} /> :
+            view === 'list' ? <FineListView fines={visibleFines} players={activePlayers} currentFilter={filter} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} currentUserRole={user.role} /> :
+            view === 'notifications' ? <NotificationsView user={user} fines={visibleFines} messages={visibleMessages} players={activePlayers} /> :
+            view === 'archive' ? <ArchiveView fines={visibleArchive} players={activePlayers} onBack={() => setView('player')} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} /> :
             view === 'fine_detail' ? (
                 currentSelectedFine ? (
                     <FineDetailView 
                         fine={currentSelectedFine} 
+                        hiddenPlayerIds={hiddenPlayerIds}
                         player={getFineDetailPlayer(currentSelectedFine)} 
                         currentUser={user} 
                         presetFines={presetFines} 
@@ -644,12 +617,12 @@ const App: React.FC = () => {
                         currentUserRole={user.role} 
                         currentUserId={user.id}
                         isOwnProfile={user.id === currentSelectedPlayer.id} 
-                        fines={[...fines, ...archivedFines].filter(f => f.playerId === currentSelectedPlayer.id)} 
-                        allFines={[...fines, ...archivedFines]}
+                        fines={visibleFines.filter(f => f.playerId === currentSelectedPlayer.id)}
+                        allFines={visibleFines}
                         settings={settings[currentSelectedPlayer.id] || { pushEnabled: false }} 
                         presetFines={presetFines} 
                         roles={roles} 
-                        players={players}
+                        players={activePlayers}
                         onUpdateSettings={handleUpdateSettings} 
                         onUpdatePlayer={handleUpdatePlayer} 
                         onBack={() => user.role === 'admin' ? setView('overview') : setView('list')} 
@@ -679,21 +652,30 @@ const App: React.FC = () => {
         </nav>
       )}
 
-      {showSearchModal && <SearchModal players={players} onSelect={(id) => { setSelectedPlayerId(id); setView('player'); setShowSearchModal(false); }} onClose={() => setShowSearchModal(false)} />}
-      {showSendMessageModal && user && <SendMessageModal players={players} onSend={handleSendMessage} onCancel={() => setShowSendMessageModal(false)} />}
+      {showSearchModal && <SearchModal players={activePlayers} onSelect={(id) => { setSelectedPlayerId(id); setView('player'); setShowSearchModal(false); }} onClose={() => setShowSearchModal(false)} />}
+      {showSendMessageModal && user && <SendMessageModal players={activePlayers} onSend={handleSendMessage} onCancel={() => setShowSendMessageModal(false)} />}
       {showSettingsModal && user && (
         <SettingsModal 
           currentUser={user} 
           settings={settings[user.id] || { pushEnabled: false }} 
-          players={players} presetFines={presetFines} roles={roles}
+          players={activePlayers} presetFines={presetFines} roles={roles}
           globalRules={globalRules}
           onSaveGlobalRules={handleUpdateGlobalRules}
           onSave={handleUpdateSettings} onUpdatePassword={handlePasswordChange}
           onPushToCloud={pushAllToCloud} isSyncing={isSyncing} onCancel={() => setShowSettingsModal(false)} 
-          onAddPlayer={handleAddPlayer} onRemovePlayer={handleRemovePlayer} onToggleAdmin={handleToggleAdmin}
+          onAddPlayer={handleAddPlayer} onHidePlayer={handleHidePlayer} onToggleAdmin={handleToggleAdmin}
           onAddPresetFine={handleAddPresetFine} onRemovePresetFine={handleRemovePresetFine}
           onAddRole={handleAddRole} onRemoveRole={handleRemoveRole}
-          onImportData={(d) => { if(d.fines) setFines(d.fines); if(d.players) setPlayers(d.players); }} 
+          onImportData={(d) => {
+            if (d.fines) setFines(d.fines);
+            if (d.players) setPlayers(prev => {
+              const merged = new Map<string, Player>(prev.map(p => [p.id, p]));
+              d.players.forEach((p: Player) => merged.set(p.id, { ...merged.get(p.id), ...p }));
+              const next = normalizePlayerIdentities([...merged.values()]);
+              storage.save('players', next);
+              return next;
+            });
+          }}
           exportData={{fines: [...fines, ...archivedFines], players, roles, presets: presetFines}} 
         />
       )}

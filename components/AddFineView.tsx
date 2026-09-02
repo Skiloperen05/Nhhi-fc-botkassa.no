@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Player, PresetFine, FineEntry } from '../types';
 import { Button } from './Button';
 import { generateFineComment } from '../services/commentService';
@@ -19,6 +19,12 @@ export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, pr
   const [description, setDescription] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
+  useEffect(() => {
+    if (selectedPlayerId && !players.some(p => p.id === selectedPlayerId && p.isActive !== false)) {
+      setSelectedPlayerId('');
+    }
+  }, [players, selectedPlayerId]);
+
   const handlePresetClick = (preset: PresetFine) => {
     setAmount(preset.amount);
     setCategory(preset.label);
@@ -28,8 +34,9 @@ export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, pr
     e.preventDefault();
     if (!selectedPlayerId || amount <= 0 || !category) return;
     
-    const player = players.find(p => p.id === selectedPlayerId);
-    const aiComment = player ? generateFineComment(player.name, category, description, amount) : '';
+    const player = players.find(p => p.id === selectedPlayerId && p.isActive !== false);
+    if (!player) return;
+    const aiComment = generateFineComment(player.name, category, description, amount);
 
     const newFine: FineEntry = {
       id: crypto.randomUUID(),

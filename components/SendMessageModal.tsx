@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from './Button';
 import { PlayerSelect } from './PlayerSelect';
 import { X, Send, Users } from 'lucide-react';
@@ -16,10 +16,16 @@ export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCa
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
 
+  useEffect(() => {
+    if (recipientId && !players.some(p => p.id === recipientId && p.isActive !== false)) {
+      setRecipientId('');
+    }
+  }, [players, recipientId]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!subject || !body) return;
-    if (target === 'single' && !recipientId) return;
+    if (target === 'single' && !players.some(p => p.id === recipientId && p.isActive !== false)) return;
 
     onSend(target === 'all' ? 'all' : recipientId, subject, body);
   };

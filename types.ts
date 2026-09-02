@@ -18,6 +18,7 @@ export interface RoleDefinition {
 export interface Player {
   id: string;
   name: string;
+  isActive?: boolean; // False hides the player without deleting their account or history.
   position?: string;
   email?: string;
   phone?: string;

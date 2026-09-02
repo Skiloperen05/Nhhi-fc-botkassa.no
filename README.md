@@ -69,3 +69,18 @@ npm run preview
 ```
 
 Bygget havner i `dist/`-mappen.
+
+## Medlemslisten høsten 2026
+
+Listen følger navnene i `NHHIFCmedlemslisteH2026.xlsx`: 50 aktive medlemmer,
+inkludert 19 nye. Axel Andreassen og Axel Huitfeldt Andreassen er to ulike personer.
+Eksisterende spiller-ID-er, passord, roller og historikk beholdes. Fødselsdatoer
+og adresser fra regnearket importeres ikke.
+
+Tidligere medlemmer beholdes i `LEGACY_PLAYERS` med `isActive: false`.
+Appen skjuler dem og deres bøter i visningene, men beholder komplette data i
+lagring, synkronisering og regnskapseksport. «Skjul» i spillerinnstillingene
+bruker samme flagg. Legger du til samme navn igjen, aktiveres den eksisterende
+kontoen med samme ID og historikk.
+
+Kjør `npm run test:players` for å kontrollere at kontoer, passord og ID-er bevares.

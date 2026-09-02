@@ -31,6 +31,9 @@ jobs:
       - name: Installer avhengigheter
         run: npm ci
 
+      - name: Kontroller at spillerkontoer og historikktilknytning beholdes
+        run: npm run test:players
+
       - name: Bygg applikasjonen
         run: npm run build
         env:

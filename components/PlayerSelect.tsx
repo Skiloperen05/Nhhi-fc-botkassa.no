@@ -25,15 +25,15 @@ export const PlayerSelect: React.FC<PlayerSelectProps> = ({
   // If a player is pre-selected or selected externally, update query to show name
   useEffect(() => {
     if (selectedPlayerId) {
-        const p = players.find(pl => pl.id === selectedPlayerId);
-        if (p) setQuery(p.name);
+        const p = players.find(pl => pl.id === selectedPlayerId && pl.isActive !== false);
+        setQuery(p?.name || '');
     } else {
         setQuery('');
     }
   }, [selectedPlayerId, players]);
 
   const filteredPlayers = players.filter(player => 
-    player.name.toLowerCase().includes(query.toLowerCase())
+    player.isActive !== false && player.name.toLowerCase().includes(query.toLowerCase())
   );
 
   const handleSelect = (player: Player) => {

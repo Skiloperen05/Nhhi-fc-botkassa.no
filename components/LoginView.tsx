@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Player, User } from '../types';
 import { User as UserIcon, Shield, Search, ChevronRight, Lock, KeyRound } from 'lucide-react';
 import { Button } from './Button';
@@ -15,8 +15,20 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, players }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (!selectedPlayer) return;
+    const currentPlayer = players.find(p => p.id === selectedPlayer.id && p.isActive !== false);
+    if (!currentPlayer) {
+      setSelectedPlayer(null);
+      setPassword('');
+      setError('');
+    } else if (currentPlayer !== selectedPlayer) {
+      setSelectedPlayer(currentPlayer);
+    }
+  }, [players, selectedPlayer]);
+
   const filteredPlayers = players.filter(p => 
-    p.name.toLowerCase().includes(query.toLowerCase())
+    p.isActive !== false && p.name.toLowerCase().includes(query.toLowerCase())
   );
 
   const handlePlayerClick = (player: Player) => {
@@ -29,13 +41,15 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, players }) => {
     e.preventDefault();
     if (!selectedPlayer) return;
 
-    const correctPassword = selectedPlayer.password || '1234';
+    const currentPlayer = players.find(p => p.id === selectedPlayer.id && p.isActive !== false);
+    if (!currentPlayer) { setSelectedPlayer(null); return; }
+    const correctPassword = currentPlayer.password || '1234';
     
     if (password === correctPassword) {
       onLogin({ 
-        id: selectedPlayer.id, 
-        name: selectedPlayer.name, 
-        role: selectedPlayer.systemRole 
+        id: currentPlayer.id,
+        name: currentPlayer.name,
+        role: currentPlayer.systemRole
       });
     } else {
       setError('Feil passord. Prøv igjen.');
