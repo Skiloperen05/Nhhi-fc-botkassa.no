@@ -4,22 +4,21 @@ import { createClient, RealtimeChannel } from '@supabase/supabase-js';
 const ACTIVE_SUPABASE_URL = 'https://qnwjhheoekpqqqhevztw.supabase.co';
 const ACTIVE_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_RqAMOlXY2TK012WTAyw3Yw_Js1VYXpz';
 
-const SUPABASE_URL = ACTIVE_SUPABASE_URL;
-const SUPABASE_KEY = ACTIVE_SUPABASE_PUBLISHABLE_KEY;
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string) || ACTIVE_SUPABASE_URL;
+const SUPABASE_KEY = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string) || ACTIVE_SUPABASE_PUBLISHABLE_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  throw new Error('Supabase mangler VITE_SUPABASE_URL eller VITE_SUPABASE_PUBLISHABLE_KEY.');
+if (SUPABASE_KEY && SUPABASE_KEY.startsWith('sb_secret_')) {
+  console.warn('Supabase secret key kan ikke brukes i nettleseren. Bruk en publishable key.');
 }
 
-if (SUPABASE_KEY.startsWith('sb_secret_')) {
-  throw new Error('Supabase secret key kan ikke brukes i nettleseren. Bruk en publishable key.');
-}
+const isConfigured = Boolean(SUPABASE_URL && SUPABASE_KEY && !SUPABASE_KEY.startsWith('sb_secret_'));
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+export const supabase = isConfigured ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const PREFIX = 'nhhi_v3_'; 
 
 export const cloudSave = async (type: string, id: string, value: any): Promise<boolean> => {
+  if (!supabase) return false;
   const key = `${PREFIX}${type}_${id}`;
   try {
     const { error } = await supabase
@@ -42,6 +41,7 @@ export const cloudSave = async (type: string, id: string, value: any): Promise<b
 
 export const cloudSaveBulk = async (type: string, items: {id: string, [key: string]: any}[]): Promise<boolean> => {
   if (items.length === 0) return true;
+  if (!supabase) return false;
   
   const rows = items.map(item => ({
     key: `${PREFIX}${type}_${item.id}`,
@@ -65,6 +65,7 @@ export const cloudSaveBulk = async (type: string, items: {id: string, [key: stri
 };
 
 export const cloudDelete = async (type: string, id: string): Promise<boolean> => {
+  if (!supabase) return false;
   const key = `${PREFIX}${type}_${id}`;
   try {
     const { error } = await supabase
@@ -78,6 +79,7 @@ export const cloudDelete = async (type: string, id: string): Promise<boolean> =>
 };
 
 export const cloudFetchAll = async (type: string): Promise<any[]> => {
+  if (!supabase) return [];
   try {
     const { data, error } = await supabase
       .from('app_data')
@@ -97,15 +99,23 @@ export const cloudFetchAll = async (type: string): Promise<any[]> => {
   }
 };
 
-export const subscribeToCloudChanges = (onUpdate: () => void): RealtimeChannel => {
-  return supabase
-    .channel('nhhi-realtime-v3')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'app_data' },
-      () => {
-        onUpdate();
-      }
-    )
-    .subscribe();
+export const subscribeToCloudChanges = (onUpdate: () => void): { unsubscribe: () => void } => {
+  if (!supabase) {
+    return { unsubscribe: () => {} };
+  }
+  try {
+    return supabase
+      .channel('nhhi-realtime-v3')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'app_data' },
+        () => {
+          onUpdate();
+        }
+      )
+      .subscribe();
+  } catch (e) {
+    console.warn('Realtime subscription error:', e);
+    return { unsubscribe: () => {} };
+  }
 };

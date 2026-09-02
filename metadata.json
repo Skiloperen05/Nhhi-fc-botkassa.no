@@ -3,5 +3,7 @@
   "short_name": "Botkassa",
   "description": "Det offisielle verktøyet for NHHI FC. Besøk oss på nhhi-fc-botkassa.no",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
