@@ -43,7 +43,7 @@ export interface PresetFine {
 }
 
 export type ComplaintStatus = 'pending' | 'approved' | 'rejected';
-export type FineStatus = 'paid' | 'unpaid';
+export type FineStatus = 'paid' | 'unpaid' | 'waived';
 
 export interface Complaint {
   reason: string;
@@ -86,6 +86,9 @@ export interface FineEntry {
   comments?: Comment[]; 
   reactions?: Reaction[];
   isArchived?: boolean; // Nytt felt for LTS
+  waivedReason?: string;
+  waivedDate?: string;
+  waivedBy?: string;
 }
 
 export interface Message {

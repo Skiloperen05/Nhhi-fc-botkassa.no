@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { FineEntry, PresetFine } from '../types';
+import { FineEntry, PresetFine, FineStatus } from '../types';
 import { Button } from './Button';
-import { X, Save, Trash2, Calendar, Banknote, FileText, Tag, AlertTriangle } from 'lucide-react';
+import { X, Save, Trash2, Calendar, Banknote, FileText, Tag, AlertTriangle, CheckCircle2, CircleDollarSign, FileX2 } from 'lucide-react';
 
 interface EditFineModalProps {
   fine: FineEntry;
@@ -16,6 +16,8 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
   const [reason, setReason] = useState(fine.reason);
   const [description, setDescription] = useState(fine.description || '');
   const [date, setDate] = useState(fine.date.split('T')[0]);
+  const [status, setStatus] = useState<FineStatus>(fine.status);
+  const [waivedReason, setWaivedReason] = useState(fine.waivedReason || 'Ansett som tapt av botsjef');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -25,6 +27,10 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
       amount,
       reason,
       description,
+      status,
+      waivedReason: status === 'waived' ? waivedReason : undefined,
+      waivedDate: status === 'waived' ? (fine.waivedDate || new Date().toISOString()) : undefined,
+      payRequest: status === 'paid' ? undefined : fine.payRequest,
       date: new Date(date).toISOString(),
       timestamp: new Date(date).getTime(),
     });
@@ -153,6 +159,66 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
                     className="block w-full pl-9 py-2.5 text-base sm:text-sm border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
                 />
                 </div>
+            </div>
+
+            {/* Status (Innkrevingsstatus) */}
+            <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Status / Oppgjør</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStatus('unpaid')}
+                    className={`py-2 px-2 text-xs font-bold rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                      status === 'unpaid'
+                        ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-2xs'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <CircleDollarSign size={16} className={status === 'unpaid' ? 'text-amber-600' : 'text-slate-400'} />
+                    <span>Ubetalt</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatus('paid')}
+                    className={`py-2 px-2 text-xs font-bold rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                      status === 'paid'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <CheckCircle2 size={16} className={status === 'paid' ? 'text-emerald-600' : 'text-slate-400'} />
+                    <span>Betalt</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatus('waived')}
+                    className={`py-2 px-2 text-xs font-bold rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                      status === 'waived'
+                        ? 'bg-purple-50 text-purple-800 border-purple-300 shadow-2xs'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <FileX2 size={16} className={status === 'waived' ? 'text-purple-600' : 'text-slate-400'} />
+                    <span>Tapsført</span>
+                  </button>
+                </div>
+
+                {status === 'waived' && (
+                  <div className="pt-2 animate-in fade-in duration-150">
+                    <label className="text-[11px] font-bold text-purple-700 uppercase tracking-wider block mb-1">
+                      Begrunnelse for ettergivelse / tapsføring:
+                    </label>
+                    <input
+                      type="text"
+                      value={waivedReason}
+                      onChange={(e) => setWaivedReason(e.target.value)}
+                      placeholder="F.eks: 'Ansett som tapt av botsjef'..."
+                      className="block w-full px-3 py-2 text-xs border border-purple-200 bg-purple-50/40 rounded-lg focus:ring-purple-500 focus:border-purple-500 text-slate-900"
+                    />
+                  </div>
+                )}
             </div>
 
             <div className="pt-4 flex gap-3">

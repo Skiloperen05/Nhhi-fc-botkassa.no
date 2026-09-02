@@ -164,33 +164,41 @@ const App: React.FC = () => {
         cloudFetchAll('settings'),
         cloudFetchAll('message'),
         cloudFetchAll('global')
-      ])) as [FineEntry[], FineEntry[], Player[], PresetFine[], RoleDefinition[], any[], Message[], any[]];
+      ])) as [FineEntry[] | null, FineEntry[] | null, Player[] | null, PresetFine[] | null, RoleDefinition[] | null, any[] | null, Message[] | null, any[] | null];
+
+      // Hvis skyen ikke er tilgjengelig (f.eks. offline), behold lokale data trygt
+      if (cloudFines === null && cloudPlayers === null && cloudArchived === null) {
+        if (!silent) triggerToast("Lokal modus");
+        return;
+      }
 
       let updatedArchive = archivedFines;
-      if (cloudArchived) {
+      if (cloudArchived !== null) {
         updatedArchive = cloudArchived;
         setArchivedFines(cloudArchived);
         storage.save('archived_fines', cloudArchived);
       }
 
-      setFines(prevLocal => {
-        const now = Date.now();
-        const archiveIds = new Set(updatedArchive.map(af => af.id));
-        const filteredCloudFines = (cloudFines || []).filter(cf => !archiveIds.has(cf.id));
-        const cloudMap = new Map(filteredCloudFines.map(f => [f.id, f]));
-        
-        const merged = prevLocal.filter(lf => 
-          !archiveIds.has(lf.id) && 
-          (cloudMap.has(lf.id) || (now - lf.timestamp) < 60000)
-        );
-        
-        filteredCloudFines.forEach(cf => { 
-          if (!merged.find(m => m.id === cf.id)) merged.push(cf); 
+      if (cloudFines !== null) {
+        setFines(prevLocal => {
+          const now = Date.now();
+          const archiveIds = new Set(updatedArchive.map(af => af.id));
+          const filteredCloudFines = cloudFines.filter(cf => !archiveIds.has(cf.id));
+          const cloudMap = new Map(filteredCloudFines.map(f => [f.id, f]));
+          
+          const merged = prevLocal.filter(lf => 
+            !archiveIds.has(lf.id) && 
+            (cloudMap.has(lf.id) || (now - lf.timestamp) < 60000)
+          );
+          
+          filteredCloudFines.forEach(cf => { 
+            if (!merged.find(m => m.id === cf.id)) merged.push(cf); 
+          });
+          
+          storage.save('fines', merged);
+          return [...merged];
         });
-        
-        storage.save('fines', merged);
-        return [...merged];
-      });
+      }
 
       if (cloudPlayers && cloudPlayers.length > 0) {
           setPlayers(prevLocal => {
@@ -203,21 +211,23 @@ const App: React.FC = () => {
           });
       }
 
-      if (cloudMessages) { setMessages(cloudMessages); storage.save('messages', cloudMessages); }
-      if (cloudPresets?.length > 0) { setPresetFines(cloudPresets); storage.save('presets', cloudPresets); }
-      if (cloudRoles?.length > 0) { setRoles(cloudRoles); storage.save('roles', cloudRoles); }
-      if (cloudRules?.length > 0) {
+      if (cloudMessages !== null && cloudMessages.length > 0) { setMessages(cloudMessages); storage.save('messages', cloudMessages); }
+      if (cloudPresets !== null && cloudPresets.length > 0) { setPresetFines(cloudPresets); storage.save('presets', cloudPresets); }
+      if (cloudRoles !== null && cloudRoles.length > 0) { setRoles(cloudRoles); storage.save('roles', cloudRoles); }
+      if (cloudRules !== null && cloudRules.length > 0) {
           const rulesText = cloudRules.find(r => r.id === 'rules')?.text || '';
           setGlobalRules(rulesText);
           storage.save('global_rules', rulesText);
       }
-      const settingsMap: Record<string, UserSettings> = {};
-      (cloudSettings || []).forEach((s: any) => settingsMap[s.playerId] = s);
-      setSettings(settingsMap);
+      if (cloudSettings !== null) {
+        const settingsMap: Record<string, UserSettings> = {};
+        cloudSettings.forEach((s: any) => settingsMap[s.playerId] = s);
+        setSettings(settingsMap);
+      }
 
       if (!silent) triggerToast("Synkronisert");
     } catch (error) {
-      console.error("Sync error:", error);
+      console.warn("Sync notice:", error);
     } finally {
       setIsSyncing(false);
       setIsLoading(false);
@@ -242,6 +252,20 @@ const App: React.FC = () => {
         return newList;
       });
       await cloudSave('fine', fine.id, fine);
+    }
+  };
+
+  const saveBulkFines = async (newFines: FineEntry[]) => {
+    if (newFines.length === 0) return;
+    setFines(prev => {
+      const newList = [...prev, ...newFines];
+      storage.save('fines', newList);
+      return newList;
+    });
+    try {
+      await cloudSaveBulk('fine', newFines);
+    } catch (e) {
+      console.error("Bulk save error:", e);
     }
   };
 
@@ -469,10 +493,11 @@ const App: React.FC = () => {
     const targetFines = user?.role === 'admin' ? allUniqueFines : allUniqueFines.filter(f => f.playerId === user?.id);
     const debt = targetFines.filter(f => f.status === 'unpaid').reduce((a, b) => a + b.amount, 0);
     const paid = targetFines.filter(f => f.status === 'paid').reduce((a, b) => a + b.amount, 0);
+    const waived = targetFines.filter(f => f.status === 'waived').reduce((a, b) => a + b.amount, 0);
     const total = debt + paid;
     const percent = total > 0 ? Math.round((paid / total) * 100) : 0;
     
-    return { debt, paid, total, percent };
+    return { debt, paid, waived, total, percent };
   }, [user, historyFines]);
 
   if (isLoading) {
@@ -493,7 +518,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-24">
+    <div className={`min-h-screen bg-slate-50 text-slate-900 font-sans ${view === 'add' ? 'h-[100dvh] overflow-hidden md:h-auto md:min-h-screen md:overflow-visible pb-0 md:pb-32 flex flex-col' : 'pb-24'}`}>
       {showSuccessToast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
           <CheckCircle2 size={16} className="text-green-400" />
@@ -508,11 +533,38 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* COMPACT MOBILE HEADER FOR 'ADD' VIEW (Takes minimal vertical space so everything fits without scrolling) */}
+      {user && view === 'add' && (
+        <header className="md:hidden bg-blue-900 text-white px-3.5 py-2 flex items-center justify-between shadow-sm flex-none z-30">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-white/10 border border-white/10 text-blue-200">
+              {user.role === 'admin' ? 'Botsjef' : 'Spiller'}
+            </span>
+            <h1 className="text-base font-black tracking-tight leading-none">Gi bot</h1>
+            <button onClick={() => syncFromCloud()} className={`p-1 rounded-full ${isSyncing ? 'animate-pulse text-amber-400' : 'text-green-400'}`}>
+              <Cloud size={13} />
+            </button>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <div className="text-right">
+              <span className="block text-[8px] font-black uppercase tracking-wider text-blue-300">Lagkassen</span>
+              <span className="block text-xs font-black tracking-tight text-white leading-none">{headerStats.total.toLocaleString('nb-NO')} kr</span>
+            </div>
+            <button onClick={() => setShowSearchModal(true)} className="p-1.5 bg-blue-800/80 rounded-lg hover:bg-blue-700 transition-colors">
+              <Search size={14} />
+            </button>
+            <button onClick={() => setShowSettingsModal(true)} className="p-1.5 bg-blue-800/80 rounded-lg hover:bg-blue-700 transition-colors">
+              <Settings size={14} />
+            </button>
+          </div>
+        </header>
+      )}
+
       {user && (
-        <header className="bg-blue-900 text-white pt-10 pb-16 px-6 rounded-b-[3.5rem] shadow-xl relative overflow-hidden">
+        <header className={`bg-blue-900 text-white ${view === 'add' ? 'hidden md:block pt-8 pb-12' : 'pt-10 pb-16'} px-6 rounded-b-[3.5rem] shadow-xl relative overflow-hidden flex-none`}>
             <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none -rotate-12"><Shield size={280} /></div>
-            <div className="relative z-10">
-                <div className="flex justify-between items-start mb-6">
+            <div className="relative z-10 max-w-6xl mx-auto">
+                <div className="flex justify-between items-start mb-4">
                     <div>
                         <div className="flex items-center space-x-2 mb-2">
                             <button onClick={() => setShowSettingsModal(true)} className="p-2 bg-blue-800 rounded-xl hover:bg-blue-700 transition-colors"><Settings size={16} /></button>
@@ -523,10 +575,59 @@ const App: React.FC = () => {
                                 <Cloud size={14} />
                             </button>
                         </div>
-                        <h1 className="text-2xl font-black tracking-tight">NHHI FC</h1>
-                        <p className="text-blue-200 text-xs">{user.name}</p>
+                        <h1 className="text-2xl font-black tracking-tight">{view === 'add' ? 'Gi bot' : 'NHHI FC'}</h1>
+                        <p className="text-blue-200 text-xs">{view === 'add' ? 'Registrer bot på spillere' : user.name}</p>
                     </div>
+
+                    {/* PC Desktop Navigation Bar (skrivebordsvisning) */}
+                    <div className="hidden md:flex items-center bg-blue-950/70 p-1.5 rounded-2xl border border-white/10 shadow-inner">
+                      {user.role === 'admin' && (
+                        <button
+                          onClick={() => setView('add')}
+                          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                            view === 'add' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-200 hover:text-white hover:bg-white/5'
+                          }`}
+                        >
+                          <PlusCircle size={16} />
+                          <span>Gi Bot</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setView('overview')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                          view === 'overview' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-200 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <BarChart3 size={16} />
+                        <span>Oversikt</span>
+                      </button>
+                      <button
+                        onClick={() => setView('list')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                          view === 'list' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-200 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <Table size={16} />
+                        <span>Bøteliste</span>
+                      </button>
+                      <button
+                        onClick={() => { setSelectedPlayerId(user.id); setView('player'); }}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                          view === 'player' && selectedPlayerId === user.id ? 'bg-blue-600 text-white shadow-md' : 'text-blue-200 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <Shield size={16} />
+                        <span>Min Profil</span>
+                      </button>
+                    </div>
+
                     <div className="flex items-center space-x-2">
+                        {view === 'add' && (
+                          <div className="text-right mr-1">
+                            <div className="text-[9px] font-black uppercase tracking-wider text-blue-300">Lagkassen</div>
+                            <div className="text-base font-black tracking-tight text-white">{headerStats.total.toLocaleString('nb-NO')} kr</div>
+                          </div>
+                        )}
                         <button onClick={() => setShowSearchModal(true)} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors"><Search size={20} /></button>
                         {user.role === 'admin' && (
                           <button onClick={() => setShowSendMessageModal(true)} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors">
@@ -539,17 +640,21 @@ const App: React.FC = () => {
                 </div>
 
                 {/* --- OPPDATERT HEADER-STRUKTUR (TOTAL & PROGRESS) --- */}
-                <div className="space-y-4">
+                {view !== 'add' && (
+                  <div className="space-y-4">
                     <div className="bg-white/5 backdrop-blur-md rounded-[2.5rem] p-6 border border-white/10 shadow-inner">
                         <div className="flex justify-between items-end mb-4">
                             <div className="text-center flex-1">
                                 <div className="text-blue-300 text-[10px] font-black uppercase mb-1">Gjeld</div>
                                 <div className="text-2xl font-black">{headerStats.debt.toLocaleString()} kr</div>
+                                {headerStats.waived > 0 && (
+                                  <div className="text-[10px] text-purple-300 font-bold mt-0.5">({headerStats.waived.toLocaleString()} kr tapt)</div>
+                                )}
                             </div>
                             
                             <div className="px-4 text-center">
                                 <div className="text-white/40 text-[9px] font-black uppercase mb-1">Total påløpt</div>
-                                <div className="text-sm font-black text-amber-400">{headerStats.total.toLocaleString()} kr</div>
+                                <div className="text-sm font-black text-amber-400">{(headerStats.total + headerStats.waived).toLocaleString()} kr</div>
                             </div>
 
                             <div className="text-center flex-1">
@@ -572,20 +677,68 @@ const App: React.FC = () => {
                             </div>
                         </div>
                     </div>
-                </div>
+                  </div>
+                )}
             </div>
         </header>
       )}
 
-      <main className={`px-4 max-w-lg mx-auto ${user ? '-mt-10 relative z-20' : ''}`}>
+      <main className={`w-full ${user ? (view === 'add' ? 'flex-1 min-h-0 overflow-hidden md:overflow-visible px-2 pt-1 pb-[4.75rem] md:pb-8 md:p-6 md:max-w-6xl md:mx-auto md:-mt-8 relative z-20 flex flex-col' : 'px-4 max-w-lg md:max-w-6xl mx-auto -mt-10 md:-mt-8 relative z-20') : ''}`}>
         {!user ? (
             <div className="mt-20">
               <LoginView onLogin={handleLogin} players={activePlayers} />
             </div>
         ) : (
-            view === 'add' ? <AddFineView onAddFine={saveFine} players={activePlayers} presetFines={presetFines} /> :
+            view === 'add' ? (
+              <AddFineView 
+                onAddFine={saveFine} 
+                onAddFines={saveBulkFines} 
+                players={activePlayers} 
+                presetFines={presetFines} 
+                allFines={historyFines}
+                potTotal={headerStats.total}
+                onTriggerToast={triggerToast}
+              />
+            ) :
             view === 'overview' ? <StatsView fines={historyFines} players={players} onSelectPlayer={(id) => { setSelectedPlayerId(id); setView('player'); }} currentFilter={filter} onFilterChange={setFilter} currentUserRole={user.role} /> :
-            view === 'list' ? <FineListView fines={historyFines} players={players} currentFilter={filter} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} currentUserRole={user.role} /> :
+            view === 'list' ? (
+              <FineListView 
+                fines={historyFines} 
+                players={players} 
+                currentFilter={filter} 
+                onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} 
+                currentUserRole={user.role} 
+                onAdminPay={(fid) => {
+                  const fine = fines.find(x => x.id === fid) || archivedFines.find(x => x.id === fid);
+                  if (fine) saveFine({ ...fine, status: 'paid', payRequest: undefined });
+                }}
+                onAdminWaive={(fid, reason) => {
+                  const fine = fines.find(x => x.id === fid) || archivedFines.find(x => x.id === fid);
+                  if (fine) {
+                    saveFine({
+                      ...fine,
+                      status: 'waived',
+                      waivedReason: reason,
+                      waivedDate: new Date().toISOString(),
+                      waivedBy: user.name,
+                      payRequest: undefined
+                    });
+                  }
+                }}
+                onAdminReopen={(fid) => {
+                  const fine = fines.find(x => x.id === fid) || archivedFines.find(x => x.id === fid);
+                  if (fine) {
+                    saveFine({
+                      ...fine,
+                      status: 'unpaid',
+                      waivedReason: undefined,
+                      waivedDate: undefined,
+                      waivedBy: undefined
+                    });
+                  }
+                }}
+              />
+            ) :
             view === 'notifications' ? <NotificationsView user={user} fines={historyFines} messages={messages} players={players} /> :
             view === 'archive' ? <ArchiveView fines={archivedFines} players={players} onBack={() => setView('player')} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} /> :
             view === 'fine_detail' ? (
@@ -604,6 +757,21 @@ const App: React.FC = () => {
                         onUpdateFine={saveFine} 
                         onDeleteFine={deleteFine} 
                         onAdminPay={(fid) => saveFine({...currentSelectedFine, status: 'paid', payRequest: undefined})} 
+                        onAdminWaive={(fid, reason) => saveFine({
+                          ...currentSelectedFine,
+                          status: 'waived',
+                          waivedReason: reason,
+                          waivedDate: new Date().toISOString(),
+                          waivedBy: user.name,
+                          payRequest: undefined
+                        })}
+                        onAdminReopen={(fid) => saveFine({
+                          ...currentSelectedFine,
+                          status: 'unpaid',
+                          waivedReason: undefined,
+                          waivedDate: undefined,
+                          waivedBy: undefined
+                        })}
                     />
                 ) : ( (setView('list'), null) )
             ) :
@@ -639,7 +807,7 @@ const App: React.FC = () => {
       </main>
 
       {user && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-2xl border-t border-slate-200 pb-safe pt-2 z-50">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-2xl border-t border-slate-200 pb-safe pt-2 z-50">
             <div className="flex justify-around items-center max-w-lg mx-auto h-16 px-4">
               {user.role === 'admin' && <button onClick={() => setView('add')} className={`flex flex-col items-center justify-center w-16 h-16 rounded-2xl transition-all ${view === 'add' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><PlusCircle size={22} /><span className="text-[10px] font-black mt-1 uppercase">Gi Bot</span></button>}
               <button onClick={() => setView('overview')} className={`flex flex-col items-center justify-center w-16 h-16 rounded-2xl transition-all ${view === 'overview' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><BarChart3 size={22} /><span className="text-[10px] font-black mt-1 uppercase">Oversikt</span></button>

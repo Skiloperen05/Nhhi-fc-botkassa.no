@@ -1,10 +1,11 @@
 
 import React, { useState } from 'react';
 import { FineEntry, Player, Comment, Reaction, PresetFine } from '../types';
-import { ChevronLeft, User, Calendar, Quote, MessageSquare, Send, SmilePlus, Trash2, Settings, DollarSign, MessageCircleWarning, Info, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, User, Calendar, Quote, MessageSquare, Send, SmilePlus, Trash2, Settings, DollarSign, MessageCircleWarning, Info, CheckCircle2, FileX2, RotateCcw } from 'lucide-react';
 import { Button } from './Button';
 import { EditFineModal } from './EditFineModal';
 import { ComplaintModal } from './ComplaintModal';
+import { WaiveFineModal } from './WaiveFineModal';
 
 interface FineDetailViewProps {
   fine: FineEntry;
@@ -20,6 +21,8 @@ interface FineDetailViewProps {
   onUpdateFine: (fine: FineEntry) => void;
   onDeleteFine: (fineId: string) => void;
   onAdminPay: (fineId: string) => void;
+  onAdminWaive?: (fineId: string, reason?: string) => void;
+  onAdminReopen?: (fineId: string) => void;
 }
 
 const REACTION_EMOJIS = ['👍', '👎', '😄', '❤️', '🍺', '⚽', '🟥', '🔥', '💀'];
@@ -108,13 +111,18 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
   onToggleCommentReaction,
   onUpdateFine,
   onDeleteFine,
-  onAdminPay
+  onAdminPay,
+  onAdminWaive,
+  onAdminReopen,
 }) => {
   const [commentText, setCommentText] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [showComplaintModal, setShowComplaintModal] = useState(false);
+  const [showWaiveModal, setShowWaiveModal] = useState(false);
   
   const isPaid = fine.status === 'paid';
+  const isWaived = fine.status === 'waived';
+  const isUnpaid = fine.status === 'unpaid';
   const isAdmin = currentUser?.role === 'admin';
   const isMine = currentUser?.id === player.id;
   const hasPendingAction = fine.complaint?.status === 'pending' || fine.payRequest?.status === 'pending';
@@ -197,6 +205,22 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                 <CheckCircle2 size={14} /> Denne boten er gjort opp for.
             </div>
         )}
+
+        {isWaived && (
+            <div className="mt-4 flex flex-col items-center justify-center gap-1 text-purple-200 text-[11px] font-bold bg-white/10 py-3 px-4 rounded-2xl border border-white/15 text-center">
+                <div className="flex items-center gap-1.5 text-purple-300 uppercase tracking-widest font-black text-[10px]">
+                    <FileX2 size={14} /> Boten er ettergitt / tapsført
+                </div>
+                {fine.waivedReason && (
+                    <div className="text-white/90 font-normal italic text-xs">«{fine.waivedReason}»</div>
+                )}
+                {fine.waivedDate && (
+                    <div className="text-[9px] text-white/50 uppercase tracking-wider font-semibold mt-0.5">
+                        Registrert {new Date(fine.waivedDate).toLocaleDateString('nb-NO')}
+                    </div>
+                )}
+            </div>
+        )}
       </div>
 
       {/* Main Card */}
@@ -205,10 +229,15 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
             {/* Amount */}
             <div className="mt-4 mb-2">
                 <div className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Beløp</div>
-                <div className="text-5xl font-black text-slate-900 tracking-tighter flex justify-center items-start">
+                <div className={`text-5xl font-black tracking-tighter flex justify-center items-start ${isWaived ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
                     {fine.amount}
                     <span className="text-lg font-medium text-slate-400 mt-2 ml-1">kr</span>
                 </div>
+                {isWaived && (
+                    <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-black uppercase px-2.5 py-0.5 bg-purple-50 text-purple-700 rounded-full border border-purple-200 tracking-wider">
+                        <FileX2 size={11} /> Tapsført (0 kr utestående)
+                    </div>
+                )}
             </div>
 
             <div className="w-full border-t border-slate-100 my-6"></div>
@@ -221,15 +250,38 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                 )}
             </div>
 
-            {/* Admin Quick Pay Button if Unpaid */}
-            {isAdmin && !isPaid && (
-                <div className="mb-4">
+            {/* Admin Actions (Pay / Waive / Reopen) */}
+            {isAdmin && isUnpaid && (
+                <div className="mb-4 flex items-center justify-center gap-2 flex-wrap">
                     <button 
                         onClick={() => onAdminPay(fine.id)}
                         className="inline-flex items-center px-4 py-2 bg-green-50 text-green-700 rounded-full text-[10px] font-black border border-green-200 hover:bg-green-100 transition-colors uppercase tracking-widest"
                     >
                         <DollarSign size={14} className="mr-1.5" />
                         BEKREFT BETALING
+                    </button>
+                    {onAdminWaive && (
+                        <button 
+                            onClick={() => setShowWaiveModal(true)}
+                            className="inline-flex items-center px-4 py-2 bg-purple-50 text-purple-700 rounded-full text-[10px] font-black border border-purple-200 hover:bg-purple-100 transition-colors uppercase tracking-widest"
+                            title="Tapsfør bot hvis du anser den som uinnkrevbar"
+                        >
+                            <FileX2 size={14} className="mr-1.5" />
+                            ETTERGI / TAPSFØR
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {isAdmin && isWaived && onAdminReopen && (
+                <div className="mb-4">
+                    <button 
+                        onClick={() => onAdminReopen(fine.id)}
+                        className="inline-flex items-center px-4 py-2 bg-slate-100 text-slate-700 rounded-full text-[10px] font-black border border-slate-200 hover:bg-slate-200 transition-colors uppercase tracking-widest"
+                        title="Gjenåpne boten som aktiv ubetalt gjeld"
+                    >
+                        <RotateCcw size={14} className="mr-1.5" />
+                        GJENÅPNE SOM UBETALT
                     </button>
                 </div>
             )}
@@ -377,6 +429,18 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
             fine={fine}
             onConfirm={(fid, r) => handleComplaintSubmit(fid, r)}
             onCancel={() => setShowComplaintModal(false)}
+          />
+      )}
+
+      {showWaiveModal && onAdminWaive && (
+          <WaiveFineModal
+            fine={fine}
+            player={player}
+            onConfirm={(reason) => {
+              onAdminWaive(fine.id, reason);
+              setShowWaiveModal(false);
+            }}
+            onCancel={() => setShowWaiveModal(false)}
           />
       )}
     </div>
