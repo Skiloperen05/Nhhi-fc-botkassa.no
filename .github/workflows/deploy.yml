@@ -31,7 +31,10 @@ jobs:
       - name: Installer avhengigheter
         run: npm ci
 
-      - name: Kontroller at spillerkontoer og historikktilknytning beholdes
+      - name: Kontroller TypeScript
+        run: npx tsc --noEmit
+
+      - name: Kontroller kontoer, historikk, lagring og datofiltre
         run: npm run test:players
 
       - name: Bygg applikasjonen

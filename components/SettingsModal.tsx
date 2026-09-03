@@ -1,4 +1,6 @@
 
+import { useSaveAction } from '../hooks/useSaveAction';
+import { SaveStatus } from './SaveStatus';
 import React, { useState } from 'react';
 import { Button } from './Button';
 import { UserSettings, User, Player, PresetFine, RoleDefinition, FineEntry } from '../types';
@@ -12,20 +14,19 @@ interface SettingsModalProps {
   presetFines?: PresetFine[];
   roles?: RoleDefinition[];
   globalRules?: string;
-  onSaveGlobalRules?: (text: string) => void;
-  onSave: (settings: UserSettings) => void;
-  onUpdatePassword?: (password: string) => Promise<void>;
-  onPushToCloud: () => void;
+  onSaveGlobalRules?: (text: string) => Promise<boolean>;
+  onSave: (settings: UserSettings) => Promise<boolean>;
+  onUpdatePassword?: (password: string) => Promise<boolean>;
+  onPushToCloud: () => Promise<boolean>;
   isSyncing: boolean;
   onCancel: () => void;
-  onAddPlayer?: (name: string, position: string) => void;
-  onHidePlayer?: (id: string) => void;
-  onToggleAdmin?: (playerId: string) => void;
-  onAddPresetFine?: (label: string, amount: number, icon: string) => void;
-  onRemovePresetFine?: (id: string) => void;
-  onAddRole?: (name: string, color: string) => void; 
-  onRemoveRole?: (id: string) => void; 
-  onImportData: (data: any) => void;
+  onAddPlayer?: (name: string, position: string) => Promise<boolean>;
+  onHidePlayer?: (id: string) => Promise<boolean>;
+  onToggleAdmin?: (playerId: string) => Promise<boolean>;
+  onAddPresetFine?: (label: string, amount: number, icon: string) => Promise<boolean>;
+  onRemovePresetFine?: (id: string) => Promise<boolean>;
+  onAddRole?: (name: string, color: string) => Promise<boolean>;
+  onRemoveRole?: (id: string) => Promise<boolean>;
   exportData: {
     fines: FineEntry[];
     players: Player[];
@@ -63,6 +64,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRemoveRole,
   exportData
 }) => {
+  const { isSaving, saveError, runSave } = useSaveAction();
   const [phoneNumber, setPhoneNumber] = useState(settings.phoneNumber || '');
   const [email, setEmail] = useState(settings.email || '');
   const [rulesText, setRulesText] = useState(globalRules);
@@ -76,8 +78,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleColor, setNewRoleColor] = useState('blue');
 
-  const [exportYear, setExportYear] = useState(new Date().getUTCFullYear());
-  const [exportMonth, setExportMonth] = useState(new Date().getUTCMonth());
+  const [exportYear, setExportYear] = useState(new Date().getFullYear());
+  const [exportMonth, setExportMonth] = useState(new Date().getMonth());
 
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -87,9 +89,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const isSuperAdmin = currentUser?.name === 'Birk Haugnes';
   const isAdmin = currentUser?.role === 'admin';
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ ...settings, phoneNumber, email });
+    await runSave(() => onSave({ ...settings, phoneNumber, email }));
   };
 
   const handlePasswordSubmit = async () => {
@@ -107,17 +109,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       return;
     }
 
-    await onUpdatePassword(newPassword);
-    setIsChangingPassword(false);
-    setNewPassword('');
-    setConfirmPassword('');
-    setPasswordError('');
+    await runSave(() => onUpdatePassword(newPassword), () => {
+      setIsChangingPassword(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordError('');
+    });
   };
 
   const handleSaveRules = () => {
       if (onSaveGlobalRules) {
-          onSaveGlobalRules(rulesText);
-          setIsEditingRules(false);
+          void runSave(() => onSaveGlobalRules(rulesText), () => setIsEditingRules(false));
       }
   };
 
@@ -126,7 +128,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const filteredFines = exportData.fines
           .filter(f => {
               const d = new Date(f.date);
-              return d.getUTCFullYear() === exportYear && d.getUTCMonth() === exportMonth;
+              return d.getFullYear() === exportYear && d.getMonth() === exportMonth;
           })
           .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
@@ -147,8 +149,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           const player = exportData.players.find(p => p.id === f.playerId)?.name || 'Ukjent';
           const date = new Date(f.date).toLocaleDateString('no-NO');
           const status = f.status === 'paid' ? 'Betalt' : 'Utestående';
-          const description = (f.description || '').replace(/;/g, ',');
-          csvContent += `${date};${player};${f.reason};${f.amount};${status};${description}\n`;
+          const csvCell = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+          csvContent += [date, player, f.reason, f.amount, status, f.description || ''].map(csvCell).join(';') + '\n';
       });
 
       csvContent += `;;;${totalAmount};;TOTALT FOR MÅNEDEN\n\n\n`;
@@ -190,6 +192,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
   };
 
   const renderProfile = () => (
@@ -324,7 +327,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <UploadCloud size={12} className="mr-1" /> Sky-kontroll
                 </h4>
                 <button 
-                    onClick={onPushToCloud}
+                    onClick={() => runSave(onPushToCloud)}
                     disabled={isSyncing}
                     className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50"
                 >
@@ -352,7 +355,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="flex-1 p-2.5 text-sm border border-slate-300 rounded-xl bg-white shadow-sm" 
                     />
                     <button 
-                        onClick={() => { if(newPlayerName.trim() && onAddPlayer) { onAddPlayer(newPlayerName, 'Spiller'); setNewPlayerName(''); } }}
+                        onClick={() => { if(newPlayerName.trim() && onAddPlayer) void runSave(() => onAddPlayer(newPlayerName.trim(), 'Spiller'), () => setNewPlayerName('')); }}
                         className="bg-blue-600 text-white p-2.5 rounded-xl hover:bg-blue-700 shadow-sm shrink-0"
                     >
                         <Plus size={20} />
@@ -378,7 +381,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0 ml-2">
                                 {isSuperAdmin && !isBirk && (
                                     <button 
-                                        onClick={() => onToggleAdmin && onToggleAdmin(p.id)}
+                                        onClick={() => { if (onToggleAdmin) void runSave(() => onToggleAdmin(p.id)); }}
                                         className={`p-2 rounded-lg transition-colors ${p.systemRole === 'admin' ? 'text-amber-500 hover:bg-amber-50' : 'text-slate-300 hover:bg-slate-50'}`}
                                         title="Veksle Botsjef-rettigheter"
                                     >
@@ -387,7 +390,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 )}
                                 {(!isBirk || (isSuperAdmin && isBirk)) && (
                                     <button 
-                                        onClick={() => { if(confirm(`Skjule ${p.name} i appen? Brukerkontoen og all historikk blir beholdt.`)) onHidePlayer && onHidePlayer(p.id); }}
+                                        onClick={() => { if(onHidePlayer && confirm(`Skjule ${p.name} i appen? Brukerkontoen og all historikk blir beholdt.`)) void runSave(() => onHidePlayer(p.id)); }}
                                         className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
                                         title={`Skjul ${p.name}`}
                                         aria-label={`Skjul ${p.name}`}
@@ -430,7 +433,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         ))}
                     </div>
                 </div>
-                <Button fullWidth onClick={() => { if(newFineName && onAddPresetFine) { onAddPresetFine(newFineName, newFineAmount, newFineIcon); setNewFineName(''); } }}>
+                <Button fullWidth onClick={() => { if(newFineName.trim() && Number.isFinite(newFineAmount) && newFineAmount > 0 && onAddPresetFine) void runSave(() => onAddPresetFine(newFineName.trim(), newFineAmount, newFineIcon), () => setNewFineName('')); }}>
                     <Plus size={16} className="mr-2" /> Legg til kategori
                 </Button>
             </div>
@@ -446,7 +449,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <div className="text-xs font-bold text-slate-900 truncate block w-full">{f.label}</div>
                             <div className="text-[10px] text-blue-600 font-black bg-blue-50 px-2 py-0.5 rounded-full inline-block mt-1 border border-blue-100">{f.amount} kr</div>
                         </div>
-                        <button onClick={() => onRemovePresetFine && onRemovePresetFine(f.id)} className="p-2 text-slate-300 hover:text-red-500 rounded-lg transition-colors shrink-0 ml-2"><Trash2 size={18} /></button>
+                        <button onClick={() => { if (onRemovePresetFine) void runSave(() => onRemovePresetFine(f.id)); }} className="p-2 text-slate-300 hover:text-red-500 rounded-lg transition-colors shrink-0 ml-2"><Trash2 size={18} /></button>
                     </div>
                 </div>
             ))}
@@ -468,7 +471,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         );
                     })}
                 </div>
-                <Button fullWidth onClick={() => { if(newRoleName && onAddRole) { onAddRole(newRoleName, newRoleColor); setNewRoleName(''); } }}>Legg til rolle</Button>
+                <Button fullWidth onClick={() => { if(newRoleName.trim() && onAddRole) void runSave(() => onAddRole(newRoleName.trim(), newRoleColor), () => setNewRoleName('')); }}>Legg til rolle</Button>
             </div>
         </div>
 
@@ -478,7 +481,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 return (
                     <div key={r.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl mb-2">
                         <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase border ${color.bg} ${color.text} ${color.border}`}>{r.name}</div>
-                        <button onClick={() => onRemoveRole && onRemoveRole(r.id)} className="p-2 text-slate-300 hover:text-red-500 rounded-lg transition-colors"><Trash2 size={16} /></button>
+                        <button onClick={() => { if (onRemoveRole) void runSave(() => onRemoveRole(r.id)); }} className="p-2 text-slate-300 hover:text-red-500 rounded-lg transition-colors"><Trash2 size={16} /></button>
                     </div>
                 );
             })}
@@ -550,14 +553,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onCancel}></div>
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => { if (!isSaving) onCancel(); }}></div>
       <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-sm h-[650px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
         <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-20 shrink-0">
           <div>
             <h3 className="font-black text-slate-900 text-lg uppercase tracking-tight leading-none">Innstillinger</h3>
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{currentUser?.name}</p>
           </div>
-          <button onClick={onCancel} className="p-2 bg-slate-50 text-slate-400 hover:text-slate-600 rounded-2xl transition-colors"><X size={20} /></button>
+          <button onClick={() => { if (!isSaving) onCancel(); }} className="p-2 bg-slate-50 text-slate-400 hover:text-slate-600 rounded-2xl transition-colors"><X size={20} /></button>
         </div>
 
         {isAdmin && (
@@ -565,28 +568,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="grid grid-cols-5 gap-1 p-1 bg-slate-50 rounded-full">
                     {(['profile', 'players', 'fines', 'roles', 'export'] as const).map(tab => (
                         <button 
-                            key={tab} 
+                            key={tab}
+                            disabled={isSaving}
                             onClick={() => setActiveTab(tab)}
-                            className={`py-2 rounded-full text-[8px] font-black uppercase transition-all duration-300 flex items-center justify-center ${
+                            className={`py-2 rounded-full text-[10px] font-black uppercase transition-all duration-300 flex items-center justify-center ${
                                 activeTab === tab 
                                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' 
                                 : 'text-slate-400 hover:text-slate-600'
                             }`}
                         >
-                            {tab === 'profile' ? 'Profil' : tab === 'players' ? 'Spill.' : tab === 'fines' ? 'Bøter' : tab === 'roles' ? 'Roll.' : 'Eksport'}
+                            {tab === 'profile' ? 'Profil' : tab === 'players' ? 'Spillere' : tab === 'fines' ? 'Bøter' : tab === 'roles' ? 'Roller' : 'Eksport'}
                         </button>
                     ))}
                 </div>
             </div>
         )}
 
-        <div className="p-8 flex-1 overflow-y-auto no-scrollbar pt-8 bg-white">
+        <SaveStatus isSaving={isSaving} saveError={saveError} />
+        <fieldset disabled={isSaving || isSyncing} className="min-w-0 p-8 flex-1 overflow-y-auto no-scrollbar pt-8 bg-white">
             {activeTab === 'profile' && renderProfile()}
             {activeTab === 'players' && renderPlayers()}
             {activeTab === 'fines' && renderFines()}
             {activeTab === 'roles' && renderRoles()}
             {activeTab === 'export' && renderExport()}
-        </div>
+        </fieldset>
       </div>
     </div>
   );

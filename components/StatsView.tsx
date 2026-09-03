@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { FineEntry, TimeFilter, Player, Role } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend, LineChart, Line, CartesianGrid } from 'recharts';
 import { Trophy, TrendingUp, PieChart as PieIcon, ChevronDown, Activity, Users, Wallet, ChevronUp, AlertCircle } from 'lucide-react';
+import { isDateInPeriod } from '../services/dateService';
 
 interface StatsViewProps {
   fines: FineEntry[];
@@ -14,9 +15,25 @@ interface StatsViewProps {
 }
 
 // Custom Tick to make names clickable on Y-Axis
-const CustomYAxisTick = ({ x, y, payload, onClick }: any) => {
+const CustomYAxisTick = ({ x, y, payload, onClick, players }: any) => {
+    const player = players.find((p: Player) => p.id === payload.value);
+    const label = player?.name.split(' ')[0] || 'Ukjent';
     return (
-        <g transform={`translate(${x},${y})`} style={{ cursor: 'pointer' }}>
+        <g
+            transform={`translate(${x},${y})`}
+            style={{ cursor: 'pointer' }}
+            role="button"
+            tabIndex={0}
+            aria-label={`Vis profilen til ${player?.name || label}`}
+            onClick={() => onClick(payload.value)}
+            onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onClick(payload.value);
+                }
+            }}
+        >
+            <title>{player?.name || label}</title>
             <text 
                 x={0} 
                 y={0} 
@@ -24,10 +41,9 @@ const CustomYAxisTick = ({ x, y, payload, onClick }: any) => {
                 textAnchor="end" 
                 fill="#334155" 
                 fontSize={12}
-                onClick={() => onClick(payload.value)}
                 className="hover:fill-blue-600 hover:font-bold transition-colors"
             >
-                {payload.value}
+                {label}
             </text>
         </g>
     );
@@ -58,27 +74,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
   // --- Filtering Logic for KPIs (Standard) ---
   const filteredFines = useMemo(() => {
     const now = new Date();
-    return fines.filter(fine => {
-      const fineDate = new Date(fine.date);
-      
-      if (currentFilter === 'month') {
-        return fineDate.getMonth() === now.getMonth() && fineDate.getFullYear() === now.getFullYear();
-      }
-      if (currentFilter === 'year') {
-        return fineDate.getFullYear() === now.getFullYear();
-      }
-      if (currentFilter === 'semester') {
-        const currentMonth = now.getMonth();
-        const isAutumn = currentMonth >= 7; // Aug is 7
-        const fineMonth = fineDate.getMonth();
-        const fineYear = fineDate.getFullYear();
-        
-        if (fineYear !== now.getFullYear()) return false;
-        if (isAutumn) return fineMonth >= 7;
-        return fineMonth < 7;
-      }
-      return true;
-    });
+    return fines.filter(fine => isDateInPeriod(fine.date, currentFilter, now));
   }, [fines, currentFilter]);
 
   // --- Filtering Logic for TREND CHART (Minimum Semester) ---
@@ -86,28 +82,11 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
 
   const chartFines = useMemo(() => {
     const now = new Date();
-    return fines.filter(fine => {
-      const fineDate = new Date(fine.date);
-      
-      if (chartFilter === 'year') {
-        return fineDate.getFullYear() === now.getFullYear();
-      }
-      if (chartFilter === 'semester') {
-        const currentMonth = now.getMonth();
-        const isAutumn = currentMonth >= 7; // Aug is 7
-        const fineMonth = fineDate.getMonth();
-        const fineYear = fineDate.getFullYear();
-        
-        if (fineYear !== now.getFullYear()) return false;
-        if (isAutumn) return fineMonth >= 7;
-        return fineMonth < 7;
-      }
-      return true; // 'all'
-    });
+    return fines.filter(fine => isDateInPeriod(fine.date, chartFilter, now));
   }, [fines, chartFilter]);
 
   // --- Derived Stats ---
-  const totalCollected = filteredFines.reduce((sum, fine) => sum + fine.amount, 0);
+  const totalAccrued = filteredFines.reduce((sum, fine) => sum + fine.amount, 0);
 
   const finesByPlayer = useMemo(() => {
     return players.map(player => {
@@ -146,14 +125,6 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
           .sort((a, b) => b.amount - a.amount);
   }, [fines, players]);
 
-
-  // Handler for Y-Axis name click
-  const handleNameClick = (displayName: string) => {
-      const player = finesByPlayer.find(p => p.name === displayName);
-      if (player) {
-          onSelectPlayer(player.id);
-      }
-  };
 
   // --- Data for Pie/Bar Charts ---
   
@@ -234,8 +205,11 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
         {(['all', 'year', 'semester', 'month'] as TimeFilter[]).map((filter) => (
           <button
             key={filter}
+            type="button"
+            aria-pressed={currentFilter === filter}
+            aria-label={filter === 'all' ? 'Alle perioder' : filter === 'year' ? 'Dette året' : filter === 'semester' ? 'Dette semesteret' : 'Denne måneden'}
             onClick={() => onFilterChange(filter)}
-            className={`flex-1 px-4 py-2 text-xs font-semibold uppercase tracking-wide rounded-xl whitespace-nowrap transition-all ${
+            className={`flex-1 px-2 sm:px-4 py-2 text-xs font-semibold uppercase tracking-wide rounded-xl whitespace-nowrap transition-all ${
               currentFilter === filter 
                 ? 'bg-blue-600 text-white shadow-md' 
                 : 'text-slate-500 hover:bg-slate-50'
@@ -243,33 +217,33 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
           >
             {filter === 'all' ? 'Totalt' : 
              filter === 'year' ? 'I år' :
-             filter === 'semester' ? 'Sem.' : 'Denne mnd'}
+             filter === 'semester' ? 'Semester' : 'Denne mnd'}
           </button>
         ))}
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-5 text-white shadow-lg">
+        <div className="min-w-0 bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-4 sm:p-5 text-white shadow-lg">
           <div className="flex items-center space-x-2 opacity-80 mb-2">
             <TrendingUp className="w-4 h-4" />
-            <span className="text-xs font-medium uppercase tracking-wider">Innsamlet</span>
+            <span className="text-[10px] sm:text-xs font-medium uppercase tracking-wide">Påløpte bøter</span>
           </div>
-          <div className="text-3xl font-bold">{totalCollected.toLocaleString()} kr</div>
+          <div className="text-xl sm:text-3xl font-bold break-words">{totalAccrued.toLocaleString('nb-NO')} kr</div>
           <div className="text-xs opacity-70 mt-1">
-             {currentFilter === 'all' ? 'Totalt' : 'I valgt periode'}
+             {currentFilter === 'all' ? 'Alle perioder' : 'I valgt periode'} · betalt og ubetalt
           </div>
         </div>
 
         <div 
-            className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors"
+            className="min-w-0 bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors"
             onClick={() => topSinner && topSinner.total > 0 && onSelectPlayer(topSinner.id)}
         >
            <div className="flex items-center space-x-2 text-slate-500 mb-2">
             <Trophy className="w-4 h-4 text-amber-500" />
             <span className="text-xs font-medium uppercase tracking-wider">Verstingen</span>
           </div>
-          <div className="text-xl font-bold text-slate-900 truncate">
+          <div className="text-xl font-bold text-slate-900 truncate" title={topSinner?.fullName}>
             {topSinner && topSinner.total > 0 ? topSinner.fullName : '-'}
           </div>
           <div className="text-xs text-slate-500 mt-1">
@@ -302,12 +276,12 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
                     >
                         <XAxis type="number" hide />
                         <YAxis 
-                            dataKey="name" 
+                            dataKey="id"
                             type="category" 
                             width={85} 
-                            tick={<CustomYAxisTick onClick={handleNameClick} />}
+                            tick={<CustomYAxisTick onClick={onSelectPlayer} players={players} />}
                         />
-                        <Tooltip cursor={{fill: '#f1f5f9'}} formatter={(value: number) => [`${value} kr`, 'Beløp']} />
+                        <Tooltip cursor={{fill: '#f1f5f9'}} labelFormatter={(id) => players.find(player => player.id === id)?.name || 'Ukjent spiller'} formatter={(value: number) => [`${value} kr`, 'Beløp']} />
                         <Bar 
                           dataKey="total" 
                           radius={[0, 4, 4, 0]} 
@@ -352,12 +326,16 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
       {/* Trend Chart (Line) */}
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-2">
-            <h3 className="text-lg font-bold text-slate-900 flex items-center">
-                <Activity className="w-5 h-5 mr-2 text-slate-400"/>
-                Utvikling
-            </h3>
+            <div>
+                <h3 className="text-lg font-bold text-slate-900 flex items-center">
+                    <Activity className="w-5 h-5 mr-2 text-slate-400"/>
+                    Utvikling
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">{chartFilter === 'all' ? 'Alle perioder' : chartFilter === 'year' ? 'Dette året' : 'Dette semesteret'}</p>
+            </div>
             <div className="relative">
                 <select 
+                    aria-label="Måling for utvikling"
                     value={trendMode}
                     onChange={(e) => setTrendMode(e.target.value as 'amount' | 'count')}
                     className="appearance-none pl-3 pr-8 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium"
@@ -402,6 +380,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
             </h3>
             <div className="relative">
                 <select 
+                    aria-label="Fordeling av bøter"
                     value={distMode}
                     onChange={(e) => setDistMode(e.target.value as 'type' | 'player' | 'status')}
                     className="appearance-none pl-3 pr-8 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium"
@@ -477,11 +456,12 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
       {currentUserRole === 'admin' && (
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-red-100 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-1 h-full bg-red-400"></div>
-            <div className="flex justify-between items-center mb-4">
+            <div className="mb-4">
                 <h3 className="text-lg font-bold text-slate-900 flex items-center">
                     <Wallet className="w-5 h-5 mr-2 text-red-500" />
                     Utestående ({debtList.length})
                 </h3>
+                <p className="text-xs text-slate-500 mt-1">Ubetalte bøter fra alle perioder</p>
             </div>
             
             <div className="space-y-2 relative">
@@ -500,8 +480,8 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
                                     onClick={() => !isFoggy && onSelectPlayer(player.id)}
                                     style={{ cursor: isFoggy ? 'default' : 'pointer' }}
                                 >
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                                    <div className="min-w-0 flex items-center gap-2 mr-2">
+                                        <div className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${
                                             index === 0 ? 'bg-amber-100 text-amber-700' :
                                             index === 1 ? 'bg-slate-200 text-slate-700' :
                                             index === 2 ? 'bg-orange-100 text-orange-800' :
@@ -509,9 +489,9 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
                                         }`}>
                                             {index + 1}
                                         </div>
-                                        <span className="font-medium text-slate-900">{player.name}</span>
+                                        <span className="min-w-0 font-medium text-slate-900 break-words">{player.name}</span>
                                     </div>
-                                    <span className="font-bold text-red-600">{player.amount} kr</span>
+                                    <span className="shrink-0 whitespace-nowrap font-bold text-red-600">{player.amount.toLocaleString('nb-NO')} kr</span>
                                 </div>
                             );
                         })}

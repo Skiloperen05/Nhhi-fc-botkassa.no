@@ -16,8 +16,9 @@ import { SendMessageModal } from './components/SendMessageModal';
 import { ArchiveView } from './components/ArchiveView';
 import { storage } from './services/storageService';
 import { getFineHistory } from './services/historyService';
+import { archiveFinesSafely, preparePaymentRequests } from './services/finePersistenceService';
 import { cloudSave, cloudDelete, cloudFetchAll, subscribeToCloudChanges, cloudSaveBulk } from './services/supabaseService';
-import { PlusCircle, BarChart3, Shield, Table, LogOut, Bell, Settings, Search, Loader2, CheckCircle2, Cloud, AlertTriangle, Mail } from 'lucide-react';
+import { PlusCircle, BarChart3, Shield, Table, LogOut, Bell, Settings, Search, Loader2, CheckCircle2, Cloud, AlertTriangle, Mail, Menu, RefreshCw } from 'lucide-react';
 
 import { ACCOUNT_MIGRATION_VERSION, isPlayerActive, normalizeName, normalizePlayerIdentities, repairPlayerAccounts, repairSession } from './services/playerService';
 
@@ -26,6 +27,8 @@ const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('login');
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [syncError, setSyncError] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState<string | null>(null);
   const [showErrorToast, setShowErrorToast] = useState<string | null>(null);
   
@@ -40,13 +43,54 @@ const App: React.FC = () => {
   
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [selectedFineId, setSelectedFineId] = useState<string | null>(null);
+  const [fineReturnView, setFineReturnView] = useState<ViewState>('list');
   const [filter, setFilter] = useState<TimeFilter>('all');
+  const [listMonthOffset, setListMonthOffset] = useState(0);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const fineReturnScrollRef = useRef(0);
+  const restoreFineScrollRef = useRef(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showSendMessageModal, setShowSendMessageModal] = useState(false);
   const [mustChangePassword, setMustChangePassword] = useState(false);
 
-  const lastLocalSaveRef = useRef<number>(0);
+  const mutationBusyRef = useRef(false);
+  const mutationVersionRef = useRef(0);
+  const syncSequenceRef = useRef(0);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncRef = useRef<(silent?: boolean) => Promise<void>>(async () => {});
+  const archiveAttemptRef = useRef('');
+  const messageDraftIdRef = useRef<string | null>(null);
+
+  const scheduleSync = () => {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => { void syncRef.current(true); }, 400);
+  };
+
+  // Confirm writes before changing local state. A failed save leaves the form and data intact.
+  const runMutation = async (operation: () => Promise<boolean>): Promise<boolean> => {
+    if (mutationBusyRef.current) {
+      triggerErrorToast('En lagring pågår. Prøv igjen om et øyeblikk.');
+      return false;
+    }
+    mutationBusyRef.current = true;
+    mutationVersionRef.current += 1;
+    setIsSaving(true);
+    try {
+      const saved = await operation();
+      if (!saved) triggerErrorToast('Kunne ikke lagre. Endringen er ikke bekreftet. Prøv igjen.');
+      return saved;
+    } catch (error) {
+      console.error('Lagring feilet:', error);
+      triggerErrorToast('Kunne ikke lagre. Prøv igjen når du har nett.');
+      return false;
+    } finally {
+      mutationBusyRef.current = false;
+      mutationVersionRef.current += 1;
+      setIsSaving(false);
+      scheduleSync();
+    }
+  };
 
   // Membership controls roster choices; every fine remains in history and totals.
   const activePlayers = useMemo(() => players.filter(isPlayerActive).sort((a, b) => a.name.localeCompare(b.name, 'nb')), [players]);
@@ -70,6 +114,11 @@ const App: React.FC = () => {
     const storedUser = storage.get<User | null>('session_user', null);
     const loadedFines = storage.get<FineEntry[]>('fines', []);
     const loadedArchived = storage.get<FineEntry[]>('archived_fines', []);
+    // Retain any legacy local-only records before the first confirmed-cloud sync.
+    // This recovery copy is never uploaded automatically or used to resurrect deleted fines.
+    if ((loadedFines.length || loadedArchived.length) && !storage.get('fine_recovery_before_confirmed_saves_v1', null)) {
+      storage.save('fine_recovery_before_confirmed_saves_v1', { savedAt: new Date().toISOString(), fines: loadedFines, archivedFines: loadedArchived });
+    }
     const loadedMessages = storage.get<Message[]>('messages', []);
     const loadedPresets = storage.get<PresetFine[]>('presets', DEFAULT_PRESET_FINES);
     const loadedRoles = storage.get<RoleDefinition[]>('roles', DEFAULT_ROLES);
@@ -105,53 +154,56 @@ const App: React.FC = () => {
     }
 
     syncFromCloud();
-    const subscription = subscribeToCloudChanges(() => syncFromCloud(true));
-    return () => { subscription.unsubscribe(); };
+    const subscription = subscribeToCloudChanges(scheduleSync);
+    return () => {
+      subscription.unsubscribe();
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
-    if (user?.role === 'admin' && fines.length > 0) {
-      runAutoArchive();
+    if (!isLoading && !isSyncing && !isSaving && !syncError && user?.role === 'admin' && fines.length > 0) {
+      void runAutoArchive();
     }
-  }, [user, fines]);
+  }, [user, fines, isLoading, isSyncing, isSaving, syncError]);
 
   const runAutoArchive = async () => {
     const now = new Date();
-    const currentMonth = now.getUTCMonth();
-    const currentYear = now.getUTCFullYear();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
 
     const toArchive = fines.filter(f => {
       const fineDate = new Date(f.date);
-      const isPastYear = fineDate.getUTCFullYear() < currentYear;
-      const isPastMonth = fineDate.getUTCFullYear() === currentYear && fineDate.getUTCMonth() < currentMonth;
+      const isPastYear = fineDate.getFullYear() < currentYear;
+      const isPastMonth = fineDate.getFullYear() === currentYear && fineDate.getMonth() < currentMonth;
       return isPastYear || isPastMonth;
     });
 
-    if (toArchive.length > 0) {
-      const archivedWithFlag = toArchive.map(f => ({ ...f, isArchived: true }));
-      const remainingFines = fines.filter(f => !toArchive.some(ta => ta.id === f.id));
-      
-      setFines(remainingFines);
-      setArchivedFines(prev => {
-        const newArchive = [...prev, ...archivedWithFlag];
-        storage.save('archived_fines', newArchive);
-        return newArchive;
+    if (!toArchive.length || mutationBusyRef.current) return;
+    const attempt = JSON.stringify(toArchive);
+    // Retry on a manual refresh, rather than loop continuously after a network failure.
+    if (archiveAttemptRef.current === attempt) return;
+    archiveAttemptRef.current = attempt;
+    await runMutation(async () => {
+      const result = await archiveFinesSafely(toArchive, archivedFines, { saveBulk: cloudSaveBulk, delete: cloudDelete });
+      mergeFineUpdates('archive', result.archivedFines);
+      const deletedIds = new Set(result.deletedIds);
+      setFines(prev => {
+        const next = prev.filter(f => !deletedIds.has(f.id));
+        storage.save('fines', next);
+        return next;
       });
-      storage.save('fines', remainingFines);
-
-      try {
-        await Promise.all([
-          ...toArchive.map(f => cloudDelete('fine', f.id)),
-          cloudSaveBulk('archive', archivedWithFlag)
-        ]);
-      } catch (e) {
-        console.error("Auto-archive sync failed", e);
+      if (result.failedDeleteIds.length) {
+        triggerErrorToast('Arkivkopien er lagret. Oppryddingen prøves igjen ved oppdatering.');
       }
-    }
+      return true;
+    });
   };
 
   const syncFromCloud = async (silent = false) => {
-    if (Date.now() - lastLocalSaveRef.current < 5000 && silent) return;
+    if (mutationBusyRef.current) { scheduleSync(); return; }
+    const version = mutationVersionRef.current;
+    const sequence = ++syncSequenceRef.current;
     if (!silent) setIsSyncing(true);
     
     try {
@@ -166,31 +218,12 @@ const App: React.FC = () => {
         cloudFetchAll('global')
       ])) as [FineEntry[], FineEntry[], Player[], PresetFine[], RoleDefinition[], any[], Message[], any[]];
 
-      let updatedArchive = archivedFines;
-      if (cloudArchived) {
-        updatedArchive = cloudArchived;
-        setArchivedFines(cloudArchived);
-        storage.save('archived_fines', cloudArchived);
-      }
-
-      setFines(prevLocal => {
-        const now = Date.now();
-        const archiveIds = new Set(updatedArchive.map(af => af.id));
-        const filteredCloudFines = (cloudFines || []).filter(cf => !archiveIds.has(cf.id));
-        const cloudMap = new Map(filteredCloudFines.map(f => [f.id, f]));
-        
-        const merged = prevLocal.filter(lf => 
-          !archiveIds.has(lf.id) && 
-          (cloudMap.has(lf.id) || (now - lf.timestamp) < 60000)
-        );
-        
-        filteredCloudFines.forEach(cf => { 
-          if (!merged.find(m => m.id === cf.id)) merged.push(cf); 
-        });
-        
-        storage.save('fines', merged);
-        return [...merged];
-      });
+      // A fetch begun before a write must not overwrite that write with an older response.
+      if (version !== mutationVersionRef.current || sequence !== syncSequenceRef.current) return;
+      setArchivedFines(cloudArchived);
+      storage.save('archived_fines', cloudArchived);
+      setFines(cloudFines);
+      storage.save('fines', cloudFines);
 
       if (cloudPlayers && cloudPlayers.length > 0) {
           setPlayers(prevLocal => {
@@ -214,104 +247,85 @@ const App: React.FC = () => {
       const settingsMap: Record<string, UserSettings> = {};
       (cloudSettings || []).forEach((s: any) => settingsMap[s.playerId] = s);
       setSettings(settingsMap);
+      storage.save('settings', settingsMap);
+      setSyncError(false);
 
-      if (!silent) triggerToast("Synkronisert");
+      if (!silent) { archiveAttemptRef.current = ''; triggerToast("Oppdatert"); }
     } catch (error) {
       console.error("Sync error:", error);
+      if (sequence === syncSequenceRef.current) setSyncError(true);
     } finally {
-      setIsSyncing(false);
-      setIsLoading(false);
-    }
-  };
-
-  const saveFine = async (fine: FineEntry) => {
-    // Sjekk om boten allerede finnes i arkivet
-    const isInArchive = archivedFines.some(f => f.id === fine.id) || fine.isArchived;
-
-    if (isInArchive) {
-      setArchivedFines(prev => {
-        const newList = prev.find(f => f.id === fine.id) ? prev.map(f => f.id === fine.id ? fine : f) : [...prev, fine];
-        storage.save('archived_fines', newList);
-        return newList;
-      });
-      await cloudSave('archive', fine.id, { ...fine, isArchived: true });
-    } else {
-      setFines(prev => {
-        const newList = prev.find(f => f.id === fine.id) ? prev.map(f => f.id === fine.id ? fine : f) : [...prev, fine];
-        storage.save('fines', newList);
-        return newList;
-      });
-      await cloudSave('fine', fine.id, fine);
-    }
-  };
-
-  const handlePayAllRequest = async (ids: string[]) => {
-    const updatedFines: FineEntry[] = [];
-    const date = new Date().toISOString();
-    
-    const newLocalFines = fines.map(f => {
-      if (ids.includes(f.id)) {
-        const updated = { ...f, payRequest: { status: 'pending' as const, date } };
-        updatedFines.push(updated);
-        return updated;
+      if (sequence === syncSequenceRef.current) {
+        setIsSyncing(false);
+        setIsLoading(false);
       }
-      return f;
+    }
+  };
+  syncRef.current = syncFromCloud;
+
+  const mergeFineUpdates = (type: 'fine' | 'archive', updates: FineEntry[]) => {
+    const setter = type === 'archive' ? setArchivedFines : setFines;
+    setter(prev => {
+      const merged = new Map(prev.map(f => [f.id, f]));
+      updates.forEach(f => merged.set(f.id, f));
+      const next = [...merged.values()];
+      storage.save(type === 'archive' ? 'archived_fines' : 'fines', next);
+      return next;
     });
-
-    setFines(newLocalFines);
-    storage.save('fines', newLocalFines);
-    
-    try {
-      await cloudSaveBulk('fine', updatedFines);
-      triggerToast(`${ids.length} betalinger meldt`);
-    } catch (e) {
-      triggerErrorToast("Feil ved lagring i sky");
-    }
   };
 
-  const deleteFine = async (id: string) => {
-    const isInArchive = archivedFines.some(f => f.id === id);
-    
-    if (isInArchive) {
-      setArchivedFines(prev => {
-        const newList = prev.filter(f => f.id !== id);
-        storage.save('archived_fines', newList);
-        return newList;
-      });
-      await cloudDelete('archive', id);
-    } else {
-      setFines(prev => {
-        const newList = prev.filter(f => f.id !== id);
-        storage.save('fines', newList);
-        return newList;
-      });
-      await cloudDelete('fine', id);
-    }
-    
-    if (selectedFineId === id) { setSelectedFineId(null); setView('list'); }
-    triggerToast("Slettet");
-  };
+  const saveFine = async (fine: FineEntry): Promise<boolean> => runMutation(async () => {
+    const type = archivedFines.some(f => f.id === fine.id) || fine.isArchived ? 'archive' : 'fine';
+    const updated = type === 'archive' ? { ...fine, isArchived: true } : fine;
+    if (!await cloudSave(type, fine.id, updated)) return false;
+    mergeFineUpdates(type, [updated]);
+    return true;
+  });
 
-  const handleUpdateSettings = async (playerId: string, newSettings: UserSettings) => {
-    lastLocalSaveRef.current = Date.now();
+  const handlePayAllRequest = async (ids: string[]): Promise<boolean> => runMutation(async () => {
+    const { fineUpdates, archiveUpdates } = preparePaymentRequests(ids, fines, archivedFines, new Date().toISOString());
+    let savedCount = 0;
+    let failed = false;
+    for (const [type, updates] of [['fine', fineUpdates], ['archive', archiveUpdates]] as const) {
+      if (!updates.length) continue;
+      if (await cloudSaveBulk(type, updates)) {
+        mergeFineUpdates(type, updates);
+        savedCount += updates.length;
+      } else failed = true;
+    }
+    if (savedCount) triggerToast(`${savedCount} betaling${savedCount === 1 ? '' : 'er'} meldt${failed ? '. Resten må prøves igjen.' : ''}`);
+    return !failed;
+  });
+
+  const deleteFine = async (id: string): Promise<boolean> => runMutation(async () => {
+    // If archiving left a source copy, remove it first so it cannot reappear later.
+    if (fines.some(f => f.id === id) && !await cloudDelete('fine', id)) return false;
+    if (archivedFines.some(f => f.id === id) && !await cloudDelete('archive', id)) return false;
+    setFines(prev => { const next = prev.filter(f => f.id !== id); storage.save('fines', next); return next; });
+    setArchivedFines(prev => { const next = prev.filter(f => f.id !== id); storage.save('archived_fines', next); return next; });
+    if (selectedFineId === id) { setSelectedFineId(null); setView(fineReturnView); }
+    triggerToast('Boten er slettet');
+    return true;
+  });
+
+  const handleUpdateSettings = async (playerId: string, newSettings: UserSettings): Promise<boolean> => runMutation(async () => {
+    if (!await cloudSave('settings', playerId, { ...newSettings, playerId })) return false;
     setSettings(prev => {
-        const updated = { ...prev, [playerId]: newSettings };
-        storage.save('settings', updated);
-        return updated;
+      const updated = { ...prev, [playerId]: newSettings };
+      storage.save('settings', updated);
+      return updated;
     });
-    try {
-        await cloudSave('settings', playerId, { ...newSettings, playerId });
-        triggerToast("Lagret i skyen");
-    } catch (e) {
-        triggerErrorToast("Tilkoblingsfeil");
-    }
-  };
+    triggerToast('Profilinnstillinger lagret');
+    return true;
+  });
 
-  const handleUpdateGlobalRules = async (text: string) => {
-      setGlobalRules(text);
-      storage.save('global_rules', text);
-      await cloudSave('global', 'rules', { id: 'rules', text });
-  };
+  const handleUpdateGlobalRules = async (text: string): Promise<boolean> => runMutation(async () => {
+    if (!await cloudSave('global', 'rules', { id: 'rules', text })) return false;
+    setGlobalRules(text);
+    storage.save('global_rules', text);
+    triggerToast('Regler lagret');
+    return true;
+  });
 
   const handleLogin = (u: User) => {
     const player = activePlayers.find(p => p.id === u.id);
@@ -327,119 +341,117 @@ const App: React.FC = () => {
     setUser(null); storage.remove('session_user'); setView('login'); setSelectedPlayerId(null); setMustChangePassword(false);
   };
 
-  const handleUpdatePlayer = async (playerId: string, updates: Partial<Player>) => {
-    setPlayers(prev => {
-        const updatedPlayers = prev.map(p => p.id === playerId ? { ...p, ...updates } : p);
-        storage.save('players', updatedPlayers);
-        const player = updatedPlayers.find(p => p.id === playerId);
-        if (player) cloudSave('player', playerId, player);
-        return updatedPlayers;
-    });
-  };
+  const handleUpdatePlayer = async (playerId: string, updates: Partial<Player>): Promise<boolean> => runMutation(async () => {
+    const existing = players.find(p => p.id === playerId);
+    if (!existing) return false;
+    const updated = { ...existing, ...updates };
+    if (!await cloudSave('player', playerId, updated)) return false;
+    setPlayers(prev => { const next = prev.map(p => p.id === playerId ? updated : p); storage.save('players', next); return next; });
+    if (user?.id === playerId) {
+      const nextUser = { ...user, name: updated.name, role: updated.systemRole };
+      setUser(nextUser);
+      storage.save('session_user', nextUser);
+    }
+    return true;
+  });
 
-  const handlePasswordChange = async (newPassword: string) => {
-    if (!user) return;
-    await handleUpdatePlayer(user.id, { password: newPassword, hasChangedPassword: true });
+  const handlePasswordChange = async (newPassword: string): Promise<boolean> => {
+    if (!user) return false;
+    if (!await handleUpdatePlayer(user.id, { password: newPassword, hasChangedPassword: true })) return false;
     setMustChangePassword(false);
-    triggerToast("Passord er endret!");
+    triggerToast('Passord er endret!');
+    return true;
   };
 
-  const handleSendMessage = async (recipientId: string | 'all', subject: string, body: string) => {
-    if (!user) return;
-    const newMessage: Message = { id: crypto.randomUUID(), senderId: user.id, recipientId, subject, body, timestamp: Date.now() };
-    setMessages(prev => { const newList = [newMessage, ...prev]; storage.save('messages', newList); return newList; });
-    await cloudSave('message', newMessage.id, newMessage);
+  const handleSendMessage = async (recipientId: string | 'all', subject: string, body: string): Promise<boolean> => runMutation(async () => {
+    if (!user) return false;
+    messageDraftIdRef.current ??= crypto.randomUUID();
+    const newMessage: Message = { id: messageDraftIdRef.current, senderId: user.id, recipientId, subject, body, timestamp: Date.now() };
+    if (!await cloudSave('message', newMessage.id, newMessage)) return false;
+    setMessages(prev => { const next = [newMessage, ...prev]; storage.save('messages', next); return next; });
+    messageDraftIdRef.current = null;
     setShowSendMessageModal(false);
-    triggerToast("Melding sendt!");
+    triggerToast('Melding sendt!');
+    return true;
+  });
+
+  const handleAddPlayer = async (name: string, position: string): Promise<boolean> => runMutation(async () => {
+    const cleanName = name.trim();
+    if (!cleanName) return false;
+    const existing = players.find(p => normalizeName(p.name).toLocaleLowerCase('nb') === normalizeName(cleanName).toLocaleLowerCase('nb'));
+    if (existing && isPlayerActive(existing)) {
+      triggerErrorToast('Spilleren finnes allerede');
+      return false;
+    }
+    const player: Player = existing ? { ...existing, isActive: true } : { id: crypto.randomUUID(), name: cleanName, position, systemRole: 'user', isActive: true };
+    if (!await cloudSave('player', player.id, player)) return false;
+    setPlayers(prev => { const next = existing ? prev.map(p => p.id === player.id ? player : p) : [...prev, player]; storage.save('players', next); return next; });
+    triggerToast(existing ? 'Eksisterende spiller aktivert igjen' : 'Spiller lagt til');
+    return true;
+  });
+
+  const handleHidePlayer = async (id: string): Promise<boolean> => {
+    if (!await handleUpdatePlayer(id, { isActive: false })) return false;
+    triggerToast('Spiller skjult. Konto og historikk er beholdt.');
+    return true;
   };
 
-  const handleAddPlayer = async (name: string, position: string) => {
-      const cleanName = name.trim();
-      const existing = players.find(p => normalizeName(p.name).toLocaleLowerCase('nb') === normalizeName(cleanName).toLocaleLowerCase('nb'));
-      if (existing) {
-        if (isPlayerActive(existing)) { triggerErrorToast('Spilleren finnes allerede'); return; }
-        const restored = { ...existing, isActive: true };
-        if (!await cloudSave('player', restored.id, restored)) { triggerErrorToast('Kunne ikke lagre spilleren'); return; }
-        setPlayers(prev => { const next = prev.map(p => p.id === restored.id ? restored : p); storage.save('players', next); return next; });
-        triggerToast('Eksisterende spiller aktivert igjen');
-        return;
-      }
-      const newPlayer: Player = { id: crypto.randomUUID(), name: cleanName, position, systemRole: 'user', isActive: true };
-      setPlayers(prev => { const newList = [...prev, newPlayer]; storage.save('players', newList); return newList; });
-      await cloudSave('player', newPlayer.id, newPlayer);
-      triggerToast("Spiller lagt til");
+  const handleToggleAdmin = async (playerId: string): Promise<boolean> => {
+    const player = players.find(p => p.id === playerId);
+    if (!player || !await handleUpdatePlayer(playerId, { systemRole: player.systemRole === 'admin' ? 'user' : 'admin' })) return false;
+    triggerToast('Rettigheter endret');
+    return true;
   };
 
-  const handleHidePlayer = async (id: string) => {
-      const player = players.find(p => p.id === id);
-      if (!player) return;
-      lastLocalSaveRef.current = Date.now();
-      if (!await cloudSave('player', id, { ...player, isActive: false })) {
-        triggerErrorToast('Kunne ikke skjule spilleren. Prøv igjen.');
-        return;
-      }
-      setPlayers(prev => { const next = prev.map(p => p.id === id ? { ...p, isActive: false } : p); storage.save('players', next); return next; });
-      triggerToast('Spiller skjult. Konto og historikk er beholdt.');
-  };
+  const handleAddPresetFine = async (label: string, amount: number, icon: string): Promise<boolean> => runMutation(async () => {
+    const newPreset: PresetFine = { id: crypto.randomUUID(), label, amount, icon };
+    if (!await cloudSave('preset', newPreset.id, newPreset)) return false;
+    setPresetFines(prev => { const next = [...prev, newPreset]; storage.save('presets', next); return next; });
+    triggerToast('Botkategori lagt til');
+    return true;
+  });
 
-  const handleToggleAdmin = async (playerId: string) => {
-      setPlayers(prev => {
-          const updated = prev.map(p => p.id === playerId ? { ...p, systemRole: (p.systemRole === 'admin' ? 'user' : 'admin') as any } : p);
-          storage.save('players', updated);
-          const player = updated.find(p => p.id === playerId);
-          if (player) cloudSave('player', playerId, player);
-          return updated;
-      });
-      triggerToast("Rettigheter endret");
-  };
+  const handleRemovePresetFine = async (id: string): Promise<boolean> => runMutation(async () => {
+    if (!await cloudDelete('preset', id)) return false;
+    setPresetFines(prev => { const next = prev.filter(f => f.id !== id); storage.save('presets', next); return next; });
+    triggerToast('Botkategori fjernet');
+    return true;
+  });
 
-  const handleAddPresetFine = async (label: string, amount: number, icon: string) => {
-      const newPreset: PresetFine = { id: crypto.randomUUID(), label, amount, icon };
-      setPresetFines(prev => { const newList = [...prev, newPreset]; storage.save('presets', newList); return newList; });
-      await cloudSave('preset', newPreset.id, newPreset);
-      triggerToast("Bot lagt til");
-  };
+  const handleAddRole = async (name: string, color: string): Promise<boolean> => runMutation(async () => {
+    const newRole: RoleDefinition = { id: crypto.randomUUID(), name, color };
+    if (!await cloudSave('role', newRole.id, newRole)) return false;
+    setRoles(prev => { const next = [...prev, newRole]; storage.save('roles', next); return next; });
+    triggerToast('Rolle lagt til');
+    return true;
+  });
 
-  const handleRemovePresetFine = async (id: string) => {
-      setPresetFines(prev => { const newList = prev.filter(f => f.id !== id); storage.save('presets', newList); return newList; });
-      await cloudDelete('preset', id);
-      triggerToast("Bot fjernet");
-  };
+  const handleRemoveRole = async (id: string): Promise<boolean> => runMutation(async () => {
+    if (!await cloudDelete('role', id)) return false;
+    setRoles(prev => { const next = prev.filter(r => r.id !== id); storage.save('roles', next); return next; });
+    triggerToast('Rolle fjernet');
+    return true;
+  });
 
-  const handleAddRole = async (name: string, color: string) => {
-      const newRole: RoleDefinition = { id: crypto.randomUUID(), name, color };
-      setRoles(prev => { const newList = [...prev, newRole]; storage.save('roles', newList); return newList; });
-      await cloudSave('role', newRole.id, newRole);
-      triggerToast("Rolle lagt til");
-  };
-
-  const handleRemoveRole = async (id: string) => {
-      setRoles(prev => { const newList = prev.filter(r => r.id !== id); storage.save('roles', newList); return newList; });
-      await cloudDelete('role', id);
-      triggerToast("Rolle fjernet");
-  };
-
-  const pushAllToCloud = async () => {
-    setIsSyncing(true);
-    try {
-      await Promise.all([
-        cloudSaveBulk('fine', fines),
-        cloudSaveBulk('archive', archivedFines),
-        cloudSaveBulk('player', players),
-        cloudSaveBulk('preset', presetFines),
-        cloudSaveBulk('role', roles),
-        cloudSaveBulk('message', messages),
-        cloudSave('global', 'rules', { id: 'rules', text: globalRules })
-      ]);
-      triggerToast("Alt lagret i skyen!");
-    } catch (e) {
-      triggerErrorToast("Tilkoblingsfeil.");
-    } finally { setIsSyncing(false); }
-  };
+  const pushAllToCloud = async (): Promise<boolean> => runMutation(async () => {
+    const results = await Promise.all([
+      cloudSaveBulk('fine', fines),
+      cloudSaveBulk('archive', archivedFines),
+      cloudSaveBulk('player', players),
+      cloudSaveBulk('preset', presetFines),
+      cloudSaveBulk('role', roles),
+      cloudSaveBulk('message', messages),
+      ...Object.entries<UserSettings>(settings).map(([playerId, value]) => cloudSave('settings', playerId, { ...value, playerId })),
+      cloudSave('global', 'rules', { id: 'rules', text: globalRules })
+    ]);
+    if (!results.every(Boolean)) return false;
+    triggerToast('Alt lagret i skyen!');
+    return true;
+  });
 
   const handleVoteOnComplaint = async (fineId: string, voterId: string, vote: 'maintain' | 'dismiss') => {
-      const fine = [...fines, ...archivedFines].find(f => f.id === fineId);
-      if (!fine || !fine.complaint) return;
+      const fine = historyFines.find(f => f.id === fineId);
+      if (!fine || !fine.complaint) return false;
 
       const newVotes = { ...(fine.complaint.votes || {}), [voterId]: vote };
       const updatedFine: FineEntry = {
@@ -447,8 +459,9 @@ const App: React.FC = () => {
           complaint: { ...fine.complaint, votes: newVotes }
       };
 
-      saveFine(updatedFine);
+      if (!await saveFine(updatedFine)) return false;
       triggerToast("Stemme registrert!");
+      return true;
   };
 
   const triggerToast = (msg: string) => {
@@ -460,6 +473,31 @@ const App: React.FC = () => {
     setShowErrorToast(msg);
     setTimeout(() => setShowErrorToast(null), 3000);
   };
+
+  const openFine = (id: string) => {
+    fineReturnScrollRef.current = window.scrollY;
+    setFineReturnView(view);
+    setSelectedFineId(id);
+    setView('fine_detail');
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  };
+
+  const returnFromFine = () => {
+    restoreFineScrollRef.current = true;
+    setView(fineReturnView);
+  };
+
+  useEffect(() => {
+    if (restoreFineScrollRef.current && view !== 'fine_detail') {
+      restoreFineScrollRef.current = false;
+      window.scrollTo({ top: fineReturnScrollRef.current, behavior: 'instant' });
+    }
+  }, [view]);
+
+  useEffect(() => {
+    if (view === 'fine_detail' && !historyFines.some(f => f.id === selectedFineId)) setView(fineReturnView);
+    if (view === 'player' && !players.some(p => p.id === (selectedPlayerId || user?.id))) setView('overview');
+  }, [view, historyFines, players, selectedFineId, selectedPlayerId, user, fineReturnView]);
 
   const headerStats = useMemo(() => {
     const uniqueFinesMap = new Map<string, FineEntry>();
@@ -495,89 +533,71 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-24">
       {showSuccessToast && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
+        <div role="status" className="fixed top-4 left-1/2 -translate-x-1/2 w-max max-w-[calc(100%-2rem)] z-[100] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
           <CheckCircle2 size={16} className="text-green-400" />
           <span className="text-xs font-bold uppercase">{showSuccessToast}</span>
         </div>
       )}
 
       {showErrorToast && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
+        <div role="alert" className="fixed top-4 left-1/2 -translate-x-1/2 w-max max-w-[calc(100%-2rem)] z-[100] bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
           <AlertTriangle size={16} />
           <span className="text-xs font-bold uppercase">{showErrorToast}</span>
         </div>
       )}
 
       {user && (
-        <header className="bg-blue-900 text-white pt-10 pb-16 px-6 rounded-b-[3.5rem] shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none -rotate-12"><Shield size={280} /></div>
-            <div className="relative z-10">
-                <div className="flex justify-between items-start mb-6">
-                    <div>
-                        <div className="flex items-center space-x-2 mb-2">
-                            <button onClick={() => setShowSettingsModal(true)} className="p-2 bg-blue-800 rounded-xl hover:bg-blue-700 transition-colors"><Settings size={16} /></button>
-                            <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase bg-white/10 border border-white/10">
-                              {user.role === 'admin' ? 'Botsjef' : 'Spiller'}
-                            </span>
-                            <button onClick={() => syncFromCloud()} className={`p-2 rounded-full ${isSyncing ? 'animate-pulse text-amber-400' : 'text-green-400'}`}>
-                                <Cloud size={14} />
-                            </button>
-                        </div>
-                        <h1 className="text-2xl font-black tracking-tight">NHHI FC</h1>
-                        <p className="text-blue-200 text-xs">{user.name}</p>
+        <header className="bg-blue-900 text-white px-4 pt-5 pb-9 rounded-b-[2rem] shadow-lg">
+          <div className="max-w-lg mx-auto">
+            <div className="flex justify-between items-center gap-3 mb-4">
+              <div className="min-w-0">
+                <h1 className="text-xl font-black tracking-tight">NHHI FC</h1>
+                <p className="text-blue-200 text-xs truncate">{user.name}</p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button aria-label="Søk etter spiller" title="Søk etter spiller" onClick={() => setShowSearchModal(true)} className="p-3 rounded-xl hover:bg-blue-800"><Search size={20} /></button>
+                <button aria-label="Varsler og meldinger" title="Varsler og meldinger" onClick={() => setView('notifications')} className="p-3 rounded-xl hover:bg-blue-800"><Bell size={20} /></button>
+                <div className="relative">
+                  <button aria-label="Åpne meny" aria-expanded={showActionsMenu} onClick={() => setShowActionsMenu(!showActionsMenu)} className="p-3 rounded-xl hover:bg-blue-800"><Menu size={20} /></button>
+                  {showActionsMenu && <>
+                    <button aria-label="Lukk meny" onClick={() => setShowActionsMenu(false)} className="fixed inset-0 z-[60] cursor-default" />
+                    <div className="absolute right-0 top-full mt-2 w-56 bg-white text-slate-800 rounded-2xl shadow-xl border border-slate-100 p-2 z-[70]">
+                      <button onClick={() => { setShowActionsMenu(false); setShowSettingsModal(true); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 text-sm"><Settings size={18} />Innstillinger</button>
+                      {user.role === 'admin' && <button onClick={() => { setShowActionsMenu(false); messageDraftIdRef.current = null; setShowSendMessageModal(true); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 text-sm"><Mail size={18} />Send melding</button>}
+                      <button disabled={isSyncing || isSaving} onClick={() => { setShowActionsMenu(false); void syncFromCloud(); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 text-sm disabled:opacity-50"><RefreshCw size={18} />Oppdater data</button>
+                      <button onClick={() => { setShowActionsMenu(false); handleLogout(); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 text-sm"><LogOut size={18} />Logg ut</button>
                     </div>
-                    <div className="flex items-center space-x-2">
-                        <button onClick={() => setShowSearchModal(true)} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors"><Search size={20} /></button>
-                        {user.role === 'admin' && (
-                          <button onClick={() => setShowSendMessageModal(true)} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors">
-                            <Mail size={20} />
-                          </button>
-                        )}
-                        <button onClick={() => setView('notifications')} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors"><Bell size={20} /></button>
-                        <button onClick={handleLogout} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors"><LogOut size={20} /></button>
-                    </div>
+                  </>}
                 </div>
-
-                {/* --- OPPDATERT HEADER-STRUKTUR (TOTAL & PROGRESS) --- */}
-                <div className="space-y-4">
-                    <div className="bg-white/5 backdrop-blur-md rounded-[2.5rem] p-6 border border-white/10 shadow-inner">
-                        <div className="flex justify-between items-end mb-4">
-                            <div className="text-center flex-1">
-                                <div className="text-blue-300 text-[10px] font-black uppercase mb-1">Gjeld</div>
-                                <div className="text-2xl font-black">{headerStats.debt.toLocaleString()} kr</div>
-                            </div>
-                            
-                            <div className="px-4 text-center">
-                                <div className="text-white/40 text-[9px] font-black uppercase mb-1">Total påløpt</div>
-                                <div className="text-sm font-black text-amber-400">{headerStats.total.toLocaleString()} kr</div>
-                            </div>
-
-                            <div className="text-center flex-1">
-                                <div className="text-green-300 text-[10px] font-black uppercase mb-1">Betalt</div>
-                                <div className="text-2xl font-black">{headerStats.paid.toLocaleString()} kr</div>
-                            </div>
-                        </div>
-
-                        {/* Innkrevingsgrad progress bar */}
-                        <div className="space-y-1.5">
-                            <div className="flex justify-between items-center px-1">
-                                <span className="text-[9px] font-black text-blue-300 uppercase">Innkrevingsgrad</span>
-                                <span className="text-[9px] font-black text-green-300 uppercase">{headerStats.percent}%</span>
-                            </div>
-                            <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
-                                <div 
-                                    className="h-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(16,185,129,0.3)]"
-                                    style={{ width: `${headerStats.percent}%` }}
-                                ></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+              </div>
             </div>
+            <div className="bg-white/10 rounded-2xl p-4 border border-white/10">
+              <div className="flex justify-between items-center text-[10px] text-blue-200 mb-3">
+                <span>{user.role === 'admin' ? 'Hele laget · all historikk' : 'Dine bøter · all historikk'}</span>
+                <span role="status" className="flex items-center gap-1">
+                  {(isSaving || isSyncing) ? <Loader2 size={12} className="animate-spin" /> : syncError ? <AlertTriangle size={12} /> : <Cloud size={12} />}
+                  {isSaving ? 'Lagrer…' : isSyncing ? 'Oppdaterer…' : syncError ? 'Ikke oppdatert' : 'Oppdatert'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div><p className="text-blue-200 text-[10px] mb-1">Utestående</p><p className="text-lg sm:text-xl font-black whitespace-nowrap">{headerStats.debt.toLocaleString('nb-NO')} kr</p></div>
+                <div><p className="text-blue-200 text-[10px] mb-1">Totalt påløpt</p><p className="text-lg sm:text-xl font-black whitespace-nowrap">{headerStats.total.toLocaleString('nb-NO')} kr</p></div>
+                <div><p className="text-green-200 text-[10px] mb-1">Betalt</p><p className="text-lg sm:text-xl font-black text-green-200 whitespace-nowrap">{headerStats.paid.toLocaleString('nb-NO')} kr</p></div>
+              </div>
+              <div className="mt-3 h-1.5 bg-white/10 rounded-full overflow-hidden" role="progressbar" aria-label="Andel betalt" aria-valuenow={headerStats.percent} aria-valuemin={0} aria-valuemax={100}>
+                <div className="h-full bg-emerald-400 transition-all" style={{ width: `${headerStats.percent}%` }} />
+              </div>
+              <p className="text-[10px] text-blue-200 mt-1 text-right">{headerStats.percent}% betalt</p>
+            </div>
+          </div>
         </header>
       )}
 
-      <main className={`px-4 max-w-lg mx-auto ${user ? '-mt-10 relative z-20' : ''}`}>
+      <main className={`px-4 max-w-lg mx-auto ${user ? '-mt-5 relative z-20' : ''}`}>
+        {syncError && <div role="alert" className="mb-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-sm">
+          Kunne ikke hente siste oppdatering. Viser sist lagrede data.
+          <button disabled={isSaving || isSyncing} onClick={() => void syncFromCloud()} className="ml-2 underline font-semibold">Prøv igjen</button>
+        </div>}
         {!user ? (
             <div className="mt-20">
               <LoginView onLogin={handleLogin} players={activePlayers} />
@@ -585,9 +605,9 @@ const App: React.FC = () => {
         ) : (
             view === 'add' ? <AddFineView onAddFine={saveFine} players={activePlayers} presetFines={presetFines} /> :
             view === 'overview' ? <StatsView fines={historyFines} players={players} onSelectPlayer={(id) => { setSelectedPlayerId(id); setView('player'); }} currentFilter={filter} onFilterChange={setFilter} currentUserRole={user.role} /> :
-            view === 'list' ? <FineListView fines={historyFines} players={players} currentFilter={filter} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} currentUserRole={user.role} /> :
+            view === 'list' ? <FineListView fines={historyFines} players={players} currentFilter={filter} onFilterChange={setFilter} monthOffset={listMonthOffset} onMonthOffsetChange={setListMonthOffset} onSelectFine={openFine} currentUserRole={user.role} /> :
             view === 'notifications' ? <NotificationsView user={user} fines={historyFines} messages={messages} players={players} /> :
-            view === 'archive' ? <ArchiveView fines={archivedFines} players={players} onBack={() => setView('player')} onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} /> :
+            view === 'archive' ? <ArchiveView fines={archivedFines} players={players} onBack={() => setView('player')} onSelectFine={openFine} /> :
             view === 'fine_detail' ? (
                 currentSelectedFine ? (
                     <FineDetailView 
@@ -595,17 +615,17 @@ const App: React.FC = () => {
                         player={getFineDetailPlayer(currentSelectedFine)} 
                         currentUser={user} 
                         presetFines={presetFines} 
-                        onBack={() => setView('list')} 
+                        onBack={returnFromFine}
                         onGoToProfile={(id) => { setSelectedPlayerId(id); setView('player'); }} 
                         onAddComment={(fid, t) => saveFine({...currentSelectedFine, comments: [...(currentSelectedFine.comments || []), {id: crypto.randomUUID(), userId: user.id, userName: user.name, text: t, timestamp: Date.now()}]})}
                         onDeleteComment={(fid, cid) => saveFine({...currentSelectedFine, comments: (currentSelectedFine.comments || []).filter(c => c.id !== cid)})}
-                        onToggleFineReaction={(fid, e) => { const r = currentSelectedFine.reactions || []; const i = r.findIndex(x => x.userId === user.id && x.emoji === e); saveFine({...currentSelectedFine, reactions: i > -1 ? r.filter((_, idx) => idx !== i) : [...r, {emoji: e, userId: user.id}]}) }}
+                        onToggleFineReaction={(fid, e) => { const r = currentSelectedFine.reactions || []; const i = r.findIndex(x => x.userId === user.id && x.emoji === e); return saveFine({...currentSelectedFine, reactions: i > -1 ? r.filter((_, idx) => idx !== i) : [...r, {emoji: e, userId: user.id}]}) }}
                         onToggleCommentReaction={(fid, cid, e) => saveFine({...currentSelectedFine, comments: (currentSelectedFine.comments || []).map(c => c.id === cid ? {...c, reactions: (c.reactions || []).findIndex(x => x.userId === user.id && x.emoji === e) > -1 ? (c.reactions || []).filter(x => !(x.userId === user.id && x.emoji === e)) : [...(c.reactions || []), {emoji: e, userId: user.id}]} : c)})}
                         onUpdateFine={saveFine} 
                         onDeleteFine={deleteFine} 
                         onAdminPay={(fid) => saveFine({...currentSelectedFine, status: 'paid', payRequest: undefined})} 
                     />
-                ) : ( (setView('list'), null) )
+                ) : null
             ) :
             view === 'player' ? (
                 currentSelectedPlayer ? (
@@ -625,15 +645,15 @@ const App: React.FC = () => {
                         onBack={() => user.role === 'admin' ? setView('overview') : setView('list')} 
                         onUpdateFine={saveFine} 
                         onDeleteFine={deleteFine} 
-                        onSubmitComplaint={(fid, r) => saveFine({...(fines.find(x => x.id === fid) || archivedFines.find(x => x.id === fid))!, complaint: {reason: r, status: 'pending', date: new Date().toISOString()}})} 
-                        onPayRequest={(fid) => saveFine({...(fines.find(x => x.id === fid) || archivedFines.find(x => x.id === fid))!, payRequest: {status: 'pending', date: new Date().toISOString()}})} 
+                        onSubmitComplaint={(fid, r) => saveFine({...historyFines.find(x => x.id === fid)!, complaint: {reason: r, status: 'pending', date: new Date().toISOString()}})}
+                        onPayRequest={(fid) => saveFine({...historyFines.find(x => x.id === fid)!, payRequest: {status: 'pending', date: new Date().toISOString()}})}
                         onPayAllRequest={handlePayAllRequest}
-                        onAdminPay={(fid) => saveFine({...(fines.find(x => x.id === fid) || archivedFines.find(x => x.id === fid))!, status: 'paid', payRequest: undefined})} 
+                        onAdminPay={(fid) => saveFine({...historyFines.find(x => x.id === fid)!, status: 'paid', payRequest: undefined})}
                         onVoteOnComplaint={(fid, vid, v) => handleVoteOnComplaint(fid, vid, v)}
-                        onSelectFine={(id) => { setSelectedFineId(id); setView('fine_detail'); }} 
+                        onSelectFine={openFine}
                         onOpenArchive={() => setView('archive')}
                     />
-                ) : ( (setView('overview'), null) )
+                ) : null
             ) : null
         )}
       </main>
@@ -658,22 +678,12 @@ const App: React.FC = () => {
           players={activePlayers} presetFines={presetFines} roles={roles}
           globalRules={globalRules}
           onSaveGlobalRules={handleUpdateGlobalRules}
-          onSave={handleUpdateSettings} onUpdatePassword={handlePasswordChange}
-          onPushToCloud={pushAllToCloud} isSyncing={isSyncing} onCancel={() => setShowSettingsModal(false)} 
+          onSave={(newSettings) => handleUpdateSettings(user.id, newSettings)} onUpdatePassword={handlePasswordChange}
+          onPushToCloud={pushAllToCloud} isSyncing={isSyncing || isSaving} onCancel={() => setShowSettingsModal(false)}
           onAddPlayer={handleAddPlayer} onHidePlayer={handleHidePlayer} onToggleAdmin={handleToggleAdmin}
           onAddPresetFine={handleAddPresetFine} onRemovePresetFine={handleRemovePresetFine}
           onAddRole={handleAddRole} onRemoveRole={handleRemoveRole}
-          onImportData={(d) => {
-            if (d.fines) setFines(d.fines);
-            if (d.players) setPlayers(prev => {
-              const merged = new Map<string, Player>(prev.map(p => [p.id, p]));
-              d.players.forEach((p: Player) => merged.set(p.id, { ...merged.get(p.id), ...p }));
-              const next = normalizePlayerIdentities([...merged.values()]);
-              storage.save('players', next);
-              return next;
-            });
-          }}
-          exportData={{fines: [...fines, ...archivedFines], players, roles, presets: presetFines}} 
+          exportData={{fines: historyFines, players, roles, presets: presetFines}}
         />
       )}
       {mustChangePassword && user && <ChangePasswordModal playerName={user.name} onSave={handlePasswordChange} onCancel={() => {}} />}

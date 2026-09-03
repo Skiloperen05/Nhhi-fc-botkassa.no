@@ -1,20 +1,23 @@
 
+import { useSaveAction } from '../hooks/useSaveAction';
+import { SaveStatus } from './SaveStatus';
 import React, { useState } from 'react';
 import { Button } from './Button';
 import { KeyRound, Lock, CheckCircle2, AlertCircle, ArrowRight } from 'lucide-react';
 
 interface ChangePasswordModalProps {
-  onSave: (newPassword: string) => void;
+  onSave: (newPassword: string) => Promise<boolean>;
   onCancel: () => void;
   playerName: string;
 }
 
 export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onSave, onCancel, playerName }) => {
+  const { isSaving, saveError, runSave } = useSaveAction();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword.length < 4) {
       setError('Passordet må være minst 4 tegn.');
@@ -29,7 +32,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onSave
       return;
     }
 
-    onSave(newPassword);
+    await runSave(() => onSave(newPassword));
   };
 
   return (
@@ -49,7 +52,9 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onSave
           Siden det er første gang du logger inn, må du lage deg et personlig passord for å sikre kontoen din.
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-5 text-left">
+        <SaveStatus isSaving={isSaving} saveError={saveError} />
+        <form onSubmit={handleSubmit}>
+          <fieldset disabled={isSaving} className="space-y-5 text-left">
             <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nytt passord</label>
                 <div className="relative">
@@ -92,9 +97,10 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onSave
             )}
 
             <Button type="submit" fullWidth className="py-4 shadow-xl shadow-blue-200 mt-2">
-                <span>Lagre og fortsett</span>
+                <span>{isSaving ? 'Lagrer …' : 'Lagre og fortsett'}</span>
                 <ArrowRight size={18} className="ml-2" />
             </Button>
+          </fieldset>
         </form>
       </div>
     </div>

@@ -1,5 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { SaveStatus } from './SaveStatus';
+import React, { useState, useEffect, useRef } from 'react';
 import { Player, PresetFine, FineEntry } from '../types';
 import { Button } from './Button';
 import { generateFineComment } from '../services/commentService';
@@ -7,17 +9,19 @@ import { Sparkles, FileText, Banknote } from 'lucide-react';
 import { PlayerSelect } from './PlayerSelect';
 
 interface AddFineViewProps {
-  onAddFine: (fine: FineEntry) => void;
+  onAddFine: (fine: FineEntry) => Promise<boolean>;
   players: Player[];
   presetFines: PresetFine[];
 }
 
 export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, presetFines }) => {
+  const { isSaving, saveError, runSave } = useSaveAction();
+  const draftId = useRef(crypto.randomUUID());
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('');
   const [amount, setAmount] = useState<number>(0);
   const [category, setCategory] = useState<string>('');
   const [description, setDescription] = useState<string>('');
-  const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState<string>(new Date().toLocaleDateString('sv-SE'));
 
   useEffect(() => {
     if (selectedPlayerId && !players.some(p => p.id === selectedPlayerId && p.isActive !== false)) {
@@ -30,16 +34,16 @@ export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, pr
     setCategory(preset.label);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPlayerId || amount <= 0 || !category) return;
+    if (isSaving || !selectedPlayerId || !Number.isFinite(amount) || amount <= 0 || !category || !date) return;
     
     const player = players.find(p => p.id === selectedPlayerId && p.isActive !== false);
     if (!player) return;
     const aiComment = generateFineComment(player.name, category, description, amount);
 
     const newFine: FineEntry = {
-      id: crypto.randomUUID(),
+      id: draftId.current,
       playerId: selectedPlayerId,
       amount,
       reason: category,
@@ -50,13 +54,13 @@ export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, pr
       status: 'unpaid',
     };
 
-    onAddFine(newFine);
-
-    // Reset form
-    setSelectedPlayerId('');
-    setAmount(0);
-    setCategory('');
-    setDescription('');
+    await runSave(() => onAddFine(newFine), () => {
+      draftId.current = crypto.randomUUID();
+      setSelectedPlayerId('');
+      setAmount(0);
+      setCategory('');
+      setDescription('');
+    });
   };
 
   return (
@@ -67,7 +71,9 @@ export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, pr
           Registrer ny bot
         </h2>
         
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <SaveStatus isSaving={isSaving} saveError={saveError} />
+        <form onSubmit={handleSubmit}>
+          <fieldset disabled={isSaving} className="space-y-6">
           {/* Player Selection via Autocomplete */}
           <PlayerSelect 
             label="Synderen"
@@ -161,8 +167,9 @@ export const AddFineView: React.FC<AddFineViewProps> = ({ onAddFine, players, pr
             className="mt-6"
           >
             <Sparkles className="-ml-1 mr-2 h-5 w-5" />
-            Gi bot
+            {isSaving ? 'Lagrer …' : 'Gi bot'}
           </Button>
+          </fieldset>
         </form>
       </div>
     </div>

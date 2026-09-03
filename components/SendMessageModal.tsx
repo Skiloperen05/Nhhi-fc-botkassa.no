@@ -1,3 +1,5 @@
+import { useSaveAction } from '../hooks/useSaveAction';
+import { SaveStatus } from './SaveStatus';
 import React, { useState, useEffect } from 'react';
 import { Button } from './Button';
 import { PlayerSelect } from './PlayerSelect';
@@ -5,12 +7,13 @@ import { X, Send, Users } from 'lucide-react';
 import { Player } from '../types';
 
 interface SendMessageModalProps {
-  onSend: (recipientId: string | 'all', subject: string, body: string) => void;
+  onSend: (recipientId: string | 'all', subject: string, body: string) => Promise<boolean>;
   onCancel: () => void;
   players: Player[];
 }
 
 export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCancel, players }) => {
+  const { isSaving, saveError, runSave } = useSaveAction();
   const [target, setTarget] = useState<'all' | 'single'>('all');
   const [recipientId, setRecipientId] = useState('');
   const [subject, setSubject] = useState('');
@@ -22,19 +25,19 @@ export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCa
     }
   }, [players, recipientId]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subject || !body) return;
+    if (isSaving || !subject.trim() || !body.trim()) return;
     if (target === 'single' && !players.some(p => p.id === recipientId && p.isActive !== false)) return;
 
-    onSend(target === 'all' ? 'all' : recipientId, subject, body);
+    await runSave(() => onSend(target === 'all' ? 'all' : recipientId, subject.trim(), body.trim()));
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div 
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
-        onClick={onCancel}
+        onClick={() => { if (!isSaving) onCancel(); }}
       ></div>
 
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -43,12 +46,14 @@ export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCa
             <Send className="w-5 h-5 mr-2" />
             Send melding
           </h3>
-          <button onClick={onCancel} className="text-blue-200 hover:text-white transition-colors">
+          <button onClick={() => { if (!isSaving) onCancel(); }} className="text-blue-200 hover:text-white transition-colors">
             <X size={24} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <SaveStatus isSaving={isSaving} saveError={saveError} />
+        <form onSubmit={handleSubmit}>
+          <fieldset disabled={isSaving} className="p-6 space-y-4">
             
             {/* Target Selection */}
             <div className="space-y-2">
@@ -118,8 +123,9 @@ export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCa
             </div>
 
             <Button type="submit" fullWidth className="mt-2">
-                Send melding
+                {isSaving ? 'Sender …' : 'Send melding'}
             </Button>
+          </fieldset>
         </form>
       </div>
     </div>

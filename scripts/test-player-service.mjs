@@ -20,6 +20,8 @@ try {
     compiler,
     'tests/playerService.test.ts',
     'tests/historyService.test.ts',
+    'tests/finePersistenceService.test.ts',
+    'tests/dateService.test.ts',
     '--module', 'commonjs',
     '--moduleResolution', 'node',
     '--target', 'es2022',
@@ -31,6 +33,8 @@ try {
     '--test',
     join(outputDir, 'tests', 'playerService.test.js'),
     join(outputDir, 'tests', 'historyService.test.js'),
+    join(outputDir, 'tests', 'finePersistenceService.test.js'),
+    join(outputDir, 'tests', 'dateService.test.js'),
   ]);
 } finally {
   rmSync(outputDir, { recursive: true, force: true });

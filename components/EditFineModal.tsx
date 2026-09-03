@@ -1,3 +1,5 @@
+import { useSaveAction } from '../hooks/useSaveAction';
+import { SaveStatus } from './SaveStatus';
 import React, { useState } from 'react';
 import { FineEntry, PresetFine } from '../types';
 import { Button } from './Button';
@@ -6,36 +8,38 @@ import { X, Save, Trash2, Calendar, Banknote, FileText, Tag, AlertTriangle } fro
 interface EditFineModalProps {
   fine: FineEntry;
   presetFines: PresetFine[];
-  onSave: (updatedFine: FineEntry) => void;
+  onSave: (updatedFine: FineEntry) => Promise<boolean>;
   onCancel: () => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => Promise<boolean>;
 }
 
 export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines, onSave, onCancel, onDelete }) => {
+  const { isSaving, saveError, runSave } = useSaveAction();
   const [amount, setAmount] = useState(fine.amount);
   const [reason, setReason] = useState(fine.reason);
   const [description, setDescription] = useState(fine.description || '');
   const [date, setDate] = useState(fine.date.split('T')[0]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({
+    if (!Number.isFinite(amount) || amount <= 0 || !reason.trim() || !date) return;
+    await runSave(() => onSave({
       ...fine,
       amount,
       reason,
       description,
       date: new Date(date).toISOString(),
       timestamp: new Date(date).getTime(),
-    });
+    }), onCancel);
   };
 
   const handleDeleteClick = () => {
     setShowDeleteConfirm(true);
   };
 
-  const handleConfirmDelete = () => {
-    onDelete(fine.id);
+  const handleConfirmDelete = async () => {
+    await runSave(() => onDelete(fine.id), onCancel);
   };
 
   return (
@@ -43,20 +47,21 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
       {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
-        onClick={onCancel}
+        onClick={() => { if (!isSaving) onCancel(); }}
       ></div>
 
       {/* Modal Card */}
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
           <h3 className="font-bold text-slate-900">Rediger Bot</h3>
-          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button onClick={() => { if (!isSaving) onCancel(); }} className="text-slate-400 hover:text-slate-600 transition-colors">
             <X size={24} />
           </button>
         </div>
 
+        <SaveStatus isSaving={isSaving} saveError={saveError} />
         {showDeleteConfirm ? (
-           <div className="p-6 text-center space-y-4">
+           <fieldset disabled={isSaving} className="p-6 text-center space-y-4">
              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto text-red-600">
                 <AlertTriangle size={24} />
              </div>
@@ -77,12 +82,13 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
                     onClick={handleConfirmDelete}
                     className="px-4 py-2 bg-red-600 rounded-xl text-sm font-medium text-white hover:bg-red-700"
                 >
-                    Slett bot
+                    {isSaving ? 'Lagrer …' : 'Slett bot'}
                 </button>
              </div>
-           </div>
+           </fieldset>
         ) : (
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit}>
+              <fieldset disabled={isSaving} className="p-6 space-y-4">
             
             {/* Category/Reason */}
             <div className="space-y-1">
@@ -115,6 +121,8 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
                 </div>
                 <input
                     type="number"
+                    min="1"
+                    required
                     value={amount}
                     onChange={(e) => setAmount(Number(e.target.value))}
                     className="block w-full pl-9 py-2.5 text-base sm:text-sm border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
@@ -148,6 +156,7 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
                 </div>
                 <input
                     type="date"
+                    required
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
                     className="block w-full pl-9 py-2.5 text-base sm:text-sm border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
@@ -166,9 +175,10 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
                 </button>
                 <Button type="submit" className="flex-[2] py-2.5 text-sm">
                 <Save size={18} className="mr-2" />
-                Lagre endringer
+                {isSaving ? 'Lagrer …' : 'Lagre endringer'}
                 </Button>
             </div>
+              </fieldset>
             </form>
         )}
       </div>

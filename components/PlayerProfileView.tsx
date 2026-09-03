@@ -1,4 +1,6 @@
 
+import { useSaveAction } from '../hooks/useSaveAction';
+import { SaveStatus } from './SaveStatus';
 import React, { useState, useMemo, useEffect } from 'react';
 import { Player, FineEntry, Role, UserSettings, PresetFine, CustomRole, RoleDefinition } from '../types';
 import { ChevronLeft, User, Wallet, History, TrendingUp, Pencil, MessageCircleWarning, CheckCircle2, CircleDollarSign, Smartphone, DollarSign, PenBox, Save, X, Gavel, Coins, Archive, ChevronRight, Scale, ThumbsUp, ThumbsDown, Info, Clock, CheckCheck } from 'lucide-react';
@@ -18,16 +20,16 @@ interface PlayerProfileViewProps {
   presetFines: PresetFine[];
   roles: RoleDefinition[];
   players: Player[];
-  onUpdateSettings: (playerId: string, settings: UserSettings) => void;
-  onUpdatePlayer?: (playerId: string, updates: Partial<Player>) => void;
+  onUpdateSettings: (playerId: string, settings: UserSettings) => Promise<boolean>;
+  onUpdatePlayer?: (playerId: string, updates: Partial<Player>) => Promise<boolean>;
   onBack: () => void;
-  onUpdateFine: (fine: FineEntry) => void;
-  onDeleteFine: (id: string) => void;
-  onSubmitComplaint: (fineId: string, reason: string) => void;
-  onPayRequest: (fineId: string) => void;
-  onPayAllRequest?: (fineIds: string[]) => void;
-  onAdminPay: (fineId: string) => void;
-  onVoteOnComplaint: (fineId: string, voterId: string, vote: 'maintain' | 'dismiss') => void;
+  onUpdateFine: (fine: FineEntry) => Promise<boolean>;
+  onDeleteFine: (id: string) => Promise<boolean>;
+  onSubmitComplaint: (fineId: string, reason: string) => Promise<boolean>;
+  onPayRequest: (fineId: string) => Promise<boolean>;
+  onPayAllRequest?: (fineIds: string[]) => Promise<boolean>;
+  onAdminPay: (fineId: string) => Promise<boolean>;
+  onVoteOnComplaint: (fineId: string, voterId: string, vote: 'maintain' | 'dismiss') => Promise<boolean>;
   onSelectFine: (fineId: string) => void;
   onOpenArchive: () => void;
 }
@@ -52,21 +54,23 @@ const getTimeRemaining = (complaintDate: string) => {
 const EditPlayerModal: React.FC<{
     player: Player;
     roles: RoleDefinition[];
-    onSave: (updates: Partial<Player>) => void;
+    onSave: (updates: Partial<Player>) => Promise<boolean>;
     onCancel: () => void;
 }> = ({ player, roles, onSave, onCancel }) => {
+    const { isSaving, saveError, runSave } = useSaveAction();
     const [customRole, setCustomRole] = useState<string>(player.customRole || '');
     
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onCancel}></div>
+             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => { if (!isSaving) onCancel(); }}></div>
              <div className="relative bg-white rounded-2xl shadow-xl w-full max-sm overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-slate-900">Endre Spillerinfo</h3>
-                    <button onClick={onCancel} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                    <button onClick={() => { if (!isSaving) onCancel(); }} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
                 </div>
                 
-                <div className="space-y-4">
+                <SaveStatus isSaving={isSaving} saveError={saveError} />
+                <fieldset disabled={isSaving} className="space-y-4">
                     <div>
                         <label className="text-xs font-bold text-slate-500 uppercase block mb-2">Velg Rolle</label>
                         <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
@@ -98,11 +102,11 @@ const EditPlayerModal: React.FC<{
                         </div>
                     </div>
                     
-                    <Button fullWidth onClick={() => onSave({ customRole: customRole as CustomRole })}>
+                    <Button fullWidth onClick={() => runSave(() => onSave({ customRole: customRole as CustomRole }), onCancel)}>
                         <Save size={18} className="mr-2"/>
-                        Lagre Endringer
+                        {isSaving ? 'Lagrer …' : 'Lagre Endringer'}
                     </Button>
-                </div>
+                </fieldset>
              </div>
         </div>
     );
@@ -132,17 +136,14 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
   onSelectFine,
   onOpenArchive
 }) => {
+  const { isSaving, saveError, runSave } = useSaveAction();
   const [editingFine, setEditingFine] = useState<FineEntry | null>(null);
   const [complainingFine, setComplainingFine] = useState<FineEntry | null>(null);
   const [showEditPlayer, setShowEditPlayer] = useState(false);
   const [judgmentTab, setJudgmentTab] = useState<'complaints' | 'payments'>('complaints');
 
-  const handlePlayerUpdate = (updates: Partial<Player>) => {
-    if (onUpdatePlayer) {
-      onUpdatePlayer(player.id, updates);
-    }
-    setShowEditPlayer(false);
-  };
+  const handlePlayerUpdate = (updates: Partial<Player>) =>
+    onUpdatePlayer ? onUpdatePlayer(player.id, updates) : Promise.resolve(false);
 
   const totalDebt = fines.filter(f => f.status !== 'paid').reduce((sum, fine) => sum + fine.amount, 0);
   const totalPaid = fines.filter(f => f.status === 'paid').reduce((sum, fine) => sum + fine.amount, 0);
@@ -166,28 +167,31 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
       return 'bg-slate-100 text-slate-600 border-slate-200';
   };
 
-  const handlePayAll = () => {
-    const unpaidFines = fines.filter(f => f.status === 'unpaid' && !f.payRequest);
+  const handlePayAll = async () => {
+    if (isSaving) return;
+    const unpaidFines = fines.filter(f => f.status === 'unpaid' && f.payRequest?.status !== 'pending' && f.complaint?.status !== 'pending');
     if (unpaidFines.length === 0) return;
     
-    if (confirm(`Vil du markere alle ${unpaidFines.length} bøter som betalt?`)) {
-      if (onPayAllRequest) {
-        onPayAllRequest(unpaidFines.map(f => f.id));
-      } else {
-        // Fallback hvis onPayAllRequest ikke er implementert enda
-        unpaidFines.forEach(f => onPayRequest(f.id));
-      }
+    if (confirm(`Vil du sende betalingsbekreftelse for alle ${unpaidFines.length} bøter til botsjefen?`)) {
+      await runSave(async () => {
+        if (onPayAllRequest) return onPayAllRequest(unpaidFines.map(f => f.id));
+        for (const fine of unpaidFines) {
+          if (!await onPayRequest(fine.id)) return false;
+        }
+        return true;
+      });
     }
   };
 
-  const hasUnpaidFines = fines.some(f => f.status === 'unpaid' && !f.payRequest);
+  const hasUnpaidFines = fines.some(f => f.status === 'unpaid' && f.payRequest?.status !== 'pending' && f.complaint?.status !== 'pending');
 
   return (
     <div className="space-y-6 pb-24">
-      <div className="bg-blue-900 -mx-4 -mt-10 pt-10 pb-20 px-6 rounded-b-[2rem] shadow-lg text-white relative z-10">
+      <SaveStatus isSaving={isSaving} saveError={saveError} />
+      <div className="bg-blue-900 p-4 rounded-2xl shadow-sm text-white">
         <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-                <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-blue-800 text-blue-100 transition-colors">
+                <button aria-label="Tilbake" onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-blue-800 text-blue-100 transition-colors">
                     <ChevronLeft className="w-6 h-6" />
                 </button>
                 <h2 className="text-xl font-bold text-white">Spillerprofil</h2>
@@ -195,7 +199,7 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
         </div>
       </div>
 
-      <div className="relative -mt-20 px-2 z-20">
+      <div className="relative px-2">
         <div className="bg-white rounded-[2rem] p-6 shadow-xl border border-slate-100 flex flex-col items-center text-center relative">
             {canEditPlayer && (
                 <button onClick={() => setShowEditPlayer(true)} className="absolute top-4 left-4 p-2 bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors border border-slate-100">
@@ -293,8 +297,8 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                                         </div>
 
                                         <div className="flex gap-2">
-                                            <button onClick={() => onUpdateFine({...f, complaint: { ...f.complaint!, status: 'rejected' }})} className="flex-1 py-2 bg-white text-red-500 text-[10px] font-black uppercase rounded-lg border border-red-100">Avvis klage</button>
-                                            <button onClick={() => onDeleteFine(f.id)} className="flex-1 py-2 bg-green-500 text-white text-[10px] font-black uppercase rounded-lg">Godkjenn & Slett bot</button>
+                                            <button disabled={isSaving} onClick={() => runSave(() => onUpdateFine({...f, complaint: { ...f.complaint!, status: 'rejected' }}))} className="flex-1 py-2 bg-white text-red-500 text-[10px] font-black uppercase rounded-lg border border-red-100">Avvis klage</button>
+                                            <button disabled={isSaving} onClick={() => runSave(() => onDeleteFine(f.id))} className="flex-1 py-2 bg-green-500 text-white text-[10px] font-black uppercase rounded-lg">Godkjenn & Slett bot</button>
                                         </div>
                                     </div>
                                   );
@@ -312,8 +316,8 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                                       </div>
                                       <p className="text-xs text-slate-600 mb-3">{f.reason}</p>
                                       <div className="flex gap-2">
-                                          <button onClick={() => onUpdateFine({...f, payRequest: { ...f.payRequest!, status: 'rejected' }})} className="flex-1 py-2 bg-white text-red-500 text-[10px] font-black uppercase rounded-lg border border-red-100">Avvis</button>
-                                          <button onClick={() => onAdminPay(f.id)} className="flex-1 py-2 bg-green-500 text-white text-[10px] font-black uppercase rounded-lg">Bekreftet</button>
+                                          <button disabled={isSaving} onClick={() => runSave(() => onUpdateFine({...f, payRequest: { ...f.payRequest!, status: 'rejected' }}))} className="flex-1 py-2 bg-white text-red-500 text-[10px] font-black uppercase rounded-lg border border-red-100">Avvis</button>
+                                          <button disabled={isSaving} onClick={() => runSave(() => onAdminPay(f.id))} className="flex-1 py-2 bg-green-500 text-white text-[10px] font-black uppercase rounded-lg">Bekreftet</button>
                                       </div>
                                   </div>
                               ))
@@ -365,16 +369,16 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                                       
                                       <div className="flex gap-2">
                                           <button 
-                                            disabled={isExpired}
-                                            onClick={() => onVoteOnComplaint(f.id, currentUserId, 'maintain')}
+                                            disabled={isSaving || isExpired}
+                                            onClick={() => runSave(() => onVoteOnComplaint(f.id, currentUserId, 'maintain'))}
                                             className={`flex-1 flex flex-col items-center justify-center p-2 rounded-xl border transition-all ${myVote === 'maintain' ? 'bg-red-600 border-red-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:bg-red-50 hover:border-red-200'} ${isExpired ? 'opacity-50 grayscale' : ''}`}
                                           >
                                               <ThumbsDown size={14} className="mb-1" />
                                               <span className="text-[9px] font-black uppercase">Behold ({maintainVotes})</span>
                                           </button>
                                           <button 
-                                            disabled={isExpired}
-                                            onClick={() => onVoteOnComplaint(f.id, currentUserId, 'dismiss')}
+                                            disabled={isSaving || isExpired}
+                                            onClick={() => runSave(() => onVoteOnComplaint(f.id, currentUserId, 'dismiss'))}
                                             className={`flex-1 flex flex-col items-center justify-center p-2 rounded-xl border transition-all ${myVote === 'dismiss' ? 'bg-green-600 border-green-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:bg-green-50 hover:border-green-200'} ${isExpired ? 'opacity-50 grayscale' : ''}`}
                                           >
                                               <ThumbsUp size={14} className="mb-1" />
@@ -395,7 +399,7 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
           </div>
       )}
 
-      {/* 📜 Langtidslagring Tilgang */}
+      {/* 📜 Arkiv Tilgang */}
       <div className="px-2">
           <button 
             onClick={onOpenArchive}
@@ -406,8 +410,8 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                       <Archive size={20} />
                   </div>
                   <div className="text-left">
-                      <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Langtidslagring</h4>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Historiske bøter og LTS</p>
+                      <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Arkiv</h4>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Se tidligere måneder</p>
                   </div>
               </div>
               <ChevronRight className="text-slate-300" />
@@ -418,12 +422,12 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
         <div className="flex items-center justify-between px-1 mb-4">
             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center">
                 <History className="w-3.5 h-3.5 mr-2" />
-                Bot-historikk (Aktive)
+                Bothistorikk
             </h3>
             {isOwnProfile && fines.length > 0 && (
                 <button 
                   onClick={handlePayAll}
-                  disabled={!hasUnpaidFines}
+                  disabled={isSaving || !hasUnpaidFines}
                   className={`flex items-center gap-1.5 px-3 py-1 border rounded-full text-[9px] font-black uppercase tracking-widest transition-all shadow-sm ${
                     hasUnpaidFines 
                       ? 'bg-green-50 hover:bg-green-100 border-green-100 text-green-700 active:scale-95' 
@@ -431,7 +435,7 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                   }`}
                 >
                     <CheckCheck size={12} />
-                    Betal alle
+                    {isSaving ? 'Lagrer …' : 'Meld alle betalt'}
                 </button>
             )}
         </div>
@@ -449,14 +453,14 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                             <div className="absolute top-4 right-4 flex gap-1.5 z-10">
                                 {currentUserRole === 'admin' ? (
                                     <>
-                                        {!isPaid && <button onClick={(e) => { e.stopPropagation(); onAdminPay(fine.id); }} className="p-2 bg-green-50 hover:bg-green-100 text-green-600 rounded-xl transition-colors shadow-sm"><DollarSign size={16} /></button>}
+                                        {!isPaid && <button disabled={isSaving} onClick={(e) => { e.stopPropagation(); void runSave(() => onAdminPay(fine.id)); }} className="p-2 bg-green-50 hover:bg-green-100 text-green-600 rounded-xl transition-colors shadow-sm"><DollarSign size={16} /></button>}
                                         <button onClick={(e) => { e.stopPropagation(); setEditingFine(fine); }} className="p-2 bg-slate-50 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-xl transition-colors shadow-sm"><Pencil size={16} /></button>
                                     </>
                                 ) : (
                                     isOwnProfile && !isPaid && !hasPendingAction && (
                                         <>
                                             <button 
-                                                onClick={(e) => { e.stopPropagation(); onPayRequest(fine.id); }} 
+                                                disabled={isSaving} onClick={(e) => { e.stopPropagation(); void runSave(() => onPayRequest(fine.id)); }}
                                                 className="p-2 bg-green-600 text-white rounded-xl transition-all shadow-md active:scale-90"
                                                 title="Marker som betalt"
                                             >
@@ -485,7 +489,7 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                                 <div className={`text-sm font-bold pr-2 ${isPaid ? 'text-green-800 line-through opacity-70' : 'text-slate-900'}`}>{fine.reason}</div>
                                 <span className={`font-black px-3 py-1 rounded-xl text-xs whitespace-nowrap ${isPaid ? 'bg-green-100 text-green-700' : 'bg-red-50 text-red-700'}`}>{fine.amount} kr</span>
                             </div>
-                            {fine.isArchived && <span className="absolute bottom-2 right-4 text-[8px] font-black text-blue-300 uppercase">LTS Arkiv</span>}
+                            {fine.isArchived && <span className="absolute bottom-2 right-4 text-[8px] font-black text-blue-300 uppercase">Arkivert</span>}
                         </div>
                     );
                 })
@@ -493,8 +497,8 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
         </div>
       </div>
 
-      {editingFine && <EditFineModal fine={editingFine} presetFines={presetFines} onSave={(f) => { onUpdateFine(f); setEditingFine(null); }} onDelete={(id) => { onDeleteFine(id); setEditingFine(null); }} onCancel={() => setEditingFine(null)} />}
-      {complainingFine && <ComplaintModal fine={complainingFine} onConfirm={(fid, r) => { onSubmitComplaint(fid, r); setComplainingFine(null); }} onCancel={() => setComplainingFine(null)} />}
+      {editingFine && <EditFineModal fine={editingFine} presetFines={presetFines} onSave={onUpdateFine} onDelete={onDeleteFine} onCancel={() => setEditingFine(null)} />}
+      {complainingFine && <ComplaintModal fine={complainingFine} onConfirm={onSubmitComplaint} onCancel={() => setComplainingFine(null)} />}
       {showEditPlayer && <EditPlayerModal player={player} roles={roles} onSave={handlePlayerUpdate} onCancel={() => setShowEditPlayer(false)} />}
     </div>
   );

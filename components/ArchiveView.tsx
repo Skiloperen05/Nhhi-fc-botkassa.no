@@ -28,24 +28,24 @@ export const ArchiveView: React.FC<ArchiveViewProps> = ({ fines, players, onBack
 
   return (
     <div className="space-y-6 pb-24 animate-in slide-in-from-right-4">
-      <div className="bg-blue-900 -mx-4 -mt-10 pt-10 pb-16 px-6 rounded-b-[2rem] shadow-lg text-white">
+      <div className="bg-blue-900 p-4 rounded-2xl shadow-sm text-white">
         <div className="flex items-center space-x-2">
-            <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-blue-800 text-blue-100 transition-colors">
+            <button aria-label="Tilbake" onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-blue-800 text-blue-100 transition-colors">
                 <ChevronLeft className="w-6 h-6" />
             </button>
-            <h2 className="text-xl font-bold text-white">Langtidslagring</h2>
+            <h2 className="text-xl font-bold text-white">Arkiv</h2>
         </div>
         <p className="text-blue-200 text-xs mt-2 opacity-80">Historisk oversikt over alle bøter gitt til NHHI FC.</p>
       </div>
 
-      <div className="px-2 -mt-10 relative z-20">
+      <div className="px-2 relative">
           <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl mb-6 flex items-center gap-4">
               <div className="p-3 bg-white/10 rounded-2xl">
                   <Lock className="w-6 h-6 text-blue-400" />
               </div>
               <div>
-                  <h4 className="text-sm font-black uppercase tracking-widest">Beskyttede data</h4>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Disse bøtene er låst for endring.</p>
+                  <h4 className="text-sm font-black uppercase tracking-widest">Bevart historikk</h4>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Bøter fra tidligere måneder er samlet her.</p>
               </div>
           </div>
 

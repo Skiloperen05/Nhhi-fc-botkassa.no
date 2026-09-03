@@ -3,7 +3,7 @@
 <html lang="no">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>NHHI FC Botkassa | nhhi-fc-botkassa.no</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -17,6 +17,7 @@
       input, select, textarea {
         font-size: 16px !important;
       }
+      .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
       /* Smooth scrolling */
       html {
         scroll-behavior: smooth;
@@ -56,7 +57,7 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
+
 </head>
   <body>
     <div id="root"></div>

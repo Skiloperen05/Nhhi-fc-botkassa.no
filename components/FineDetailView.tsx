@@ -1,4 +1,6 @@
 
+import { useSaveAction } from '../hooks/useSaveAction';
+import { SaveStatus } from './SaveStatus';
 import React, { useState } from 'react';
 import { FineEntry, Player, Comment, Reaction, PresetFine } from '../types';
 import { ChevronLeft, User, Calendar, Quote, MessageSquare, Send, SmilePlus, Trash2, Settings, DollarSign, MessageCircleWarning, Info, CheckCircle2 } from 'lucide-react';
@@ -13,22 +15,23 @@ interface FineDetailViewProps {
   presetFines: PresetFine[];
   onBack: () => void;
   onGoToProfile: (playerId: string) => void;
-  onAddComment: (fineId: string, text: string) => void;
-  onDeleteComment: (fineId: string, commentId: string) => void;
-  onToggleFineReaction: (fineId: string, emoji: string) => void;
-  onToggleCommentReaction: (fineId: string, commentId: string, emoji: string) => void;
-  onUpdateFine: (fine: FineEntry) => void;
-  onDeleteFine: (fineId: string) => void;
-  onAdminPay: (fineId: string) => void;
+  onAddComment: (fineId: string, text: string) => Promise<boolean>;
+  onDeleteComment: (fineId: string, commentId: string) => Promise<boolean>;
+  onToggleFineReaction: (fineId: string, emoji: string) => Promise<boolean>;
+  onToggleCommentReaction: (fineId: string, commentId: string, emoji: string) => Promise<boolean>;
+  onUpdateFine: (fine: FineEntry) => Promise<boolean>;
+  onDeleteFine: (fineId: string) => Promise<boolean>;
+  onAdminPay: (fineId: string) => Promise<boolean>;
 }
 
 const REACTION_EMOJIS = ['👍', '👎', '😄', '❤️', '🍺', '⚽', '🟥', '🔥', '💀'];
 
 const ReactionPicker: React.FC<{
   reactions?: Reaction[];
-  onToggle: (emoji: string) => void;
+  onToggle: (emoji: string) => Promise<boolean>;
+  disabled?: boolean;
   currentUserId?: string;
-}> = ({ reactions = [], onToggle, currentUserId }) => {
+}> = ({ reactions = [], onToggle, currentUserId, disabled = false }) => {
   const [showPicker, setShowPicker] = useState(false);
 
   const counts: Record<string, number> = {};
@@ -46,6 +49,7 @@ const ReactionPicker: React.FC<{
       {Object.entries(counts).map(([emoji, count]) => (
         <button
           key={emoji}
+          disabled={disabled}
           onClick={() => onToggle(emoji)}
           className={`flex items-center space-x-1 px-2 py-1 rounded-full text-sm border transition-all ${
             userReacted[emoji] 
@@ -60,6 +64,7 @@ const ReactionPicker: React.FC<{
 
       <div className="relative">
         <button
+          disabled={disabled}
           onClick={() => setShowPicker(!showPicker)}
           className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-50 border border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 transition-colors"
         >
@@ -76,9 +81,9 @@ const ReactionPicker: React.FC<{
               {REACTION_EMOJIS.map(emoji => (
                 <button
                   key={emoji}
-                  onClick={() => {
-                    onToggle(emoji);
-                    setShowPicker(false);
+                  disabled={disabled}
+                  onClick={async () => {
+                    if (await onToggle(emoji)) setShowPicker(false);
                   }}
                   className={`w-9 h-9 flex items-center justify-center text-xl rounded-lg hover:bg-slate-100 transition-colors ${
                      userReacted[emoji] ? 'bg-blue-50 border border-blue-200' : ''
@@ -110,6 +115,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
   onDeleteFine,
   onAdminPay
 }) => {
+  const { isSaving, saveError, runSave } = useSaveAction();
   const [commentText, setCommentText] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [showComplaintModal, setShowComplaintModal] = useState(false);
@@ -119,31 +125,31 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
   const isMine = currentUser?.id === player.id;
   const hasPendingAction = fine.complaint?.status === 'pending' || fine.payRequest?.status === 'pending';
 
-  const handleSendComment = (e: React.FormEvent) => {
+  const handleSendComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (commentText.trim()) {
-        onAddComment(fine.id, commentText);
-        setCommentText('');
+        await runSave(() => onAddComment(fine.id, commentText.trim()), () => setCommentText(''));
     }
   };
 
   const handlePayRequest = () => {
       // Logic handled via onUpdateFine to trigger App's saveFine
-      onUpdateFine({...fine, payRequest: { status: 'pending', date: new Date().toISOString() }});
+      return runSave(() => onUpdateFine({...fine, payRequest: { status: 'pending', date: new Date().toISOString() }}));
   };
 
   const handleComplaintSubmit = (fid: string, reason: string) => {
-      onUpdateFine({...fine, complaint: { reason, status: 'pending', date: new Date().toISOString() }});
-      setShowComplaintModal(false);
+      return onUpdateFine({...fine, complaint: { reason, status: 'pending', date: new Date().toISOString() }});
   };
 
   return (
     <div className="space-y-6 pb-24 animate-in fade-in slide-in-from-right-4 duration-300">
+      <SaveStatus isSaving={isSaving} saveError={saveError} />
       {/* Header */}
-      <div className="bg-blue-900 -mx-4 -mt-10 pt-10 pb-12 px-6 rounded-b-[2rem] shadow-lg mb-4 text-white">
+      <div className="bg-blue-900 p-4 rounded-2xl shadow-sm text-white">
         <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-2">
                 <button 
+                aria-label="Tilbake"
                 onClick={onBack}
                 className="p-2 -ml-2 rounded-full hover:bg-blue-800 text-blue-100 transition-colors"
                 >
@@ -169,6 +175,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                 {!hasPendingAction ? (
                     <>
                         <button 
+                            disabled={isSaving}
                             onClick={handlePayRequest}
                             className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700 border border-green-500 rounded-2xl text-xs font-black uppercase transition-all shadow-lg active:scale-95"
                         >
@@ -200,7 +207,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
       </div>
 
       {/* Main Card */}
-      <div className="relative -mt-16 px-2">
+      <div className="relative px-2">
         <div className="bg-white rounded-3xl p-6 shadow-lg border border-slate-100 text-center relative overflow-hidden">
             {/* Amount */}
             <div className="mt-4 mb-2">
@@ -225,7 +232,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
             {isAdmin && !isPaid && (
                 <div className="mb-4">
                     <button 
-                        onClick={() => onAdminPay(fine.id)}
+                        disabled={isSaving} onClick={() => runSave(() => onAdminPay(fine.id))}
                         className="inline-flex items-center px-4 py-2 bg-green-50 text-green-700 rounded-full text-[10px] font-black border border-green-200 hover:bg-green-100 transition-colors uppercase tracking-widest"
                     >
                         <DollarSign size={14} className="mr-1.5" />
@@ -239,7 +246,8 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                <div className="flex justify-center mb-6">
                   <ReactionPicker 
                     reactions={fine.reactions} 
-                    onToggle={(emoji) => onToggleFineReaction(fine.id, emoji)}
+                    disabled={isSaving}
+                    onToggle={(emoji) => runSave(() => onToggleFineReaction(fine.id, emoji))}
                     currentUserId={currentUser.id}
                   />
                </div>
@@ -310,7 +318,8 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                                 {currentUser && (
                                   <ReactionPicker 
                                     reactions={comment.reactions}
-                                    onToggle={(emoji) => onToggleCommentReaction(fine.id, comment.id, emoji)}
+                                    disabled={isSaving}
+                                    onToggle={(emoji) => runSave(() => onToggleCommentReaction(fine.id, comment.id, emoji))}
                                     currentUserId={currentUser.id}
                                   />
                                 )}
@@ -318,9 +327,10 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                             
                             {currentUser && (currentUser.role === 'admin' || currentUser.id === comment.userId) && (
                                 <button
+                                    disabled={isSaving}
                                     onClick={() => {
                                         if (confirm("Slette kommentaren?")) {
-                                            onDeleteComment(fine.id, comment.id);
+                                            void runSave(() => onDeleteComment(fine.id, comment.id));
                                         }
                                     }}
                                     className="absolute top-0 right-0 p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -339,6 +349,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                 <form onSubmit={handleSendComment} className="relative">
                     <input 
                         type="text" 
+                        disabled={isSaving}
                         value={commentText}
                         onChange={(e) => setCommentText(e.target.value)}
                         placeholder="Skriv en kommentar..."
@@ -346,7 +357,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                     />
                     <button 
                         type="submit"
-                        disabled={!commentText.trim()}
+                        disabled={isSaving || !commentText.trim()}
                         className="absolute right-2 top-2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors shadow-sm"
                     >
                         <Send size={16} />
@@ -360,14 +371,8 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
           <EditFineModal 
             fine={fine}
             presetFines={presetFines}
-            onSave={(updated) => {
-                onUpdateFine(updated);
-                setShowEditModal(false);
-            }}
-            onDelete={(id) => {
-                onDeleteFine(id);
-                setShowEditModal(false);
-            }}
+            onSave={onUpdateFine}
+            onDelete={onDeleteFine}
             onCancel={() => setShowEditModal(false)}
           />
       )}

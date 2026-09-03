@@ -1,11 +1,15 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { FineEntry, TimeFilter, Player, Role } from '../types';
 import { ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, TrendingUp, Trophy, Target, PieChart } from 'lucide-react';
+import { isDateInPeriod, monthAtOffset } from '../services/dateService';
 
 interface FineListViewProps {
   fines: FineEntry[];
   currentFilter: TimeFilter; 
+  onFilterChange?: (filter: TimeFilter) => void;
+  monthOffset?: number;
+  onMonthOffsetChange?: (offset: number) => void;
   onSelectFine: (fineId: string) => void;
   players: Player[];
   currentUserRole?: Role;
@@ -14,47 +18,35 @@ interface FineListViewProps {
 type SortField = 'date' | 'player' | 'reason' | 'amount';
 type SortDirection = 'asc' | 'desc';
 
-export const FineListView: React.FC<FineListViewProps> = ({ fines, currentFilter: initialFilter, onSelectFine, players, currentUserRole }) => {
-  const [filter, setFilter] = useState<TimeFilter>(initialFilter === 'all' ? 'month' : initialFilter); 
+export const FineListView: React.FC<FineListViewProps> = ({ fines, currentFilter: initialFilter, onFilterChange, monthOffset: controlledMonthOffset, onMonthOffsetChange, onSelectFine, players, currentUserRole }) => {
+  const [filter, setFilter] = useState<TimeFilter>(initialFilter);
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   
   // Måned-navigasjon (offset fra nåværende måned)
-  const [monthOffset, setMonthOffset] = useState(0);
+  const [localMonthOffset, setLocalMonthOffset] = useState(0);
+  const monthOffset = controlledMonthOffset ?? localMonthOffset;
+  const changeMonthOffset = (offset: number) => {
+    setLocalMonthOffset(offset);
+    onMonthOffsetChange?.(offset);
+  };
+
+  useEffect(() => {
+    setFilter(initialFilter);
+  }, [initialFilter]);
 
   const isAdmin = currentUserRole === 'admin';
 
   // Beregn måned-velger dato
-  const activeDate = useMemo(() => {
-      const d = new Date();
-      d.setMonth(d.getMonth() + monthOffset);
-      return d;
-  }, [monthOffset]);
+  const activeDate = useMemo(() => monthAtOffset(monthOffset), [monthOffset]);
 
   const activeMonthName = activeDate.toLocaleDateString('no-NO', { month: 'long', year: 'numeric' });
 
   // Filter fines based on local state 'filter' and 'monthOffset'
-  const filteredFines = fines.filter(fine => {
-    const fineDate = new Date(fine.date);
-    
-    if (filter === 'month') {
-      return fineDate.getMonth() === activeDate.getMonth() && fineDate.getFullYear() === activeDate.getFullYear();
-    }
-    
-    const now = new Date();
-    if (filter === 'year') {
-      return fineDate.getFullYear() === now.getFullYear();
-    }
-    if (filter === 'semester') {
-      const currentMonth = now.getMonth();
-      const isAutumn = currentMonth >= 7;
-      const fineMonth = fineDate.getMonth();
-      const fineYear = fineDate.getFullYear();
-      if (fineYear !== now.getFullYear()) return false;
-      return isAutumn ? fineMonth >= 7 : fineMonth < 7;
-    }
-    return true;
-  });
+  const filteredFines = useMemo(() => {
+    const reference = filter === 'month' ? activeDate : new Date();
+    return fines.filter(fine => isDateInPeriod(fine.date, filter, reference));
+  }, [fines, filter, activeDate]);
 
   // --- SJEFENS OVERSIKT DATA ---
   const summary = useMemo(() => {
@@ -128,11 +120,15 @@ export const FineListView: React.FC<FineListViewProps> = ({ fines, currentFilter
                 {(['all', 'year', 'semester', 'month'] as TimeFilter[]).map((f) => (
                 <button
                     key={f}
+                    type="button"
+                    aria-pressed={filter === f}
+                    aria-label={f === 'all' ? 'Alle perioder' : f === 'year' ? 'Dette året' : f === 'semester' ? 'Dette semesteret' : 'Velg måned'}
                     onClick={() => {
                         setFilter(f);
-                        if (f !== 'month') setMonthOffset(0);
+                        onFilterChange?.(f);
+                        if (f !== 'month') changeMonthOffset(0);
                     }}
-                    className={`flex-1 px-4 py-2 text-xs font-semibold uppercase tracking-wide rounded-xl whitespace-nowrap transition-all ${
+                    className={`flex-1 px-2 sm:px-4 py-2 text-xs font-semibold uppercase tracking-wide rounded-xl whitespace-nowrap transition-all ${
                     filter === f 
                         ? 'bg-blue-600 text-white shadow-md' 
                         : 'text-slate-500 hover:bg-slate-50'
@@ -140,26 +136,32 @@ export const FineListView: React.FC<FineListViewProps> = ({ fines, currentFilter
                 >
                     {f === 'all' ? 'Totalt' : 
                     f === 'year' ? 'I år' :
-                    f === 'semester' ? 'Sem.' : 'Måned'}
+                    f === 'semester' ? 'Semester' : 'Måned'}
                 </button>
                 ))}
             </div>
 
             {/* Måned-navigasjon (Løsning 1) */}
             {filter === 'month' && (
-                <div className="flex items-center justify-between px-2 animate-in fade-in slide-in-from-top-1">
-                    <button 
-                        onClick={() => setMonthOffset(prev => prev - 1)}
-                        className="p-2 bg-white border border-slate-100 rounded-xl text-slate-400 hover:text-blue-600 transition-colors shadow-sm"
+                <div className="flex items-center justify-between gap-2 px-2 animate-in fade-in slide-in-from-top-1">
+                    <button
+                        type="button"
+                        aria-label="Forrige måned"
+                        title="Forrige måned"
+                        onClick={() => changeMonthOffset(monthOffset - 1)}
+                        className="p-2.5 shrink-0 bg-white border border-slate-100 rounded-xl text-slate-400 hover:text-blue-600 transition-colors shadow-sm"
                     >
                         <ChevronLeft size={18} />
                     </button>
-                    <div className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                    <div aria-live="polite" aria-atomic="true" className="min-w-0 text-center text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">
                         {activeMonthName}
                     </div>
-                    <button 
-                        onClick={() => setMonthOffset(prev => prev + 1)}
-                        className="p-2 bg-white border border-slate-100 rounded-xl text-slate-400 hover:text-blue-600 transition-colors shadow-sm"
+                    <button
+                        type="button"
+                        aria-label="Neste måned"
+                        title="Neste måned"
+                        onClick={() => changeMonthOffset(monthOffset + 1)}
+                        className="p-2.5 shrink-0 bg-white border border-slate-100 rounded-xl text-slate-400 hover:text-blue-600 transition-colors shadow-sm"
                     >
                         <ChevronRight size={18} />
                     </button>
@@ -192,7 +194,7 @@ export const FineListView: React.FC<FineListViewProps> = ({ fines, currentFilter
                             <TrendingUp size={12} />
                             <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Sum</span>
                         </div>
-                        <div className="text-xs font-black text-slate-900">{summary.total},-</div>
+                        <div className="text-xs font-black text-slate-900 break-words">{summary.total.toLocaleString('nb-NO')},-</div>
                     </div>
                 </div>
 
@@ -209,13 +211,13 @@ export const FineListView: React.FC<FineListViewProps> = ({ fines, currentFilter
         )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+        <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-wrap justify-between items-center gap-2">
             <div>
                 <h2 className="text-lg font-bold text-slate-900">Botliste</h2>
-                <p className="text-xs text-slate-500">{sortedFines.length} bøter funnet</p>
+                <p className="text-xs text-slate-500">{sortedFines.length} {sortedFines.length === 1 ? 'bot' : 'bøter'} funnet</p>
             </div>
-            <div className="text-sm font-bold text-slate-900 whitespace-nowrap">
-                Periode-total: {sortedFines.reduce((sum, f) => sum + f.amount, 0)} kr
+            <div className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
+                Sum i perioden: {sortedFines.reduce((sum, f) => sum + f.amount, 0).toLocaleString('nb-NO')} kr
             </div>
         </div>
         
@@ -224,19 +226,19 @@ export const FineListView: React.FC<FineListViewProps> = ({ fines, currentFilter
             <thead className="bg-slate-50 text-slate-500 font-semibold uppercase tracking-wider border-b border-slate-100">
                 <tr>
                 <th 
-                    className="w-[20%] px-2 sm:px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+                    className="w-[24%] sm:w-[20%] px-2 sm:px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none"
                     onClick={() => handleSort('date')}
                 >
                     Dato <SortIcon field="date" />
                 </th>
                 <th 
-                    className="w-[25%] px-2 sm:px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none truncate"
+                    className="w-[24%] sm:w-[25%] px-2 sm:px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none truncate"
                     onClick={() => handleSort('player')}
                 >
                     Spiller <SortIcon field="player" />
                 </th>
                 <th 
-                    className="w-[35%] px-2 sm:px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none truncate"
+                    className="w-[32%] sm:w-[35%] px-2 sm:px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none truncate"
                     onClick={() => handleSort('reason')}
                 >
                     Årsak <SortIcon field="reason" />
