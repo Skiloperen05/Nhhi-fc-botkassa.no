@@ -24,7 +24,7 @@ export const ComplaintModal: React.FC<ComplaintModalProps> = ({ fine, onConfirm,
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div 
+      <div
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
         onClick={() => { if (!isSaving) onCancel(); }}
       ></div>
@@ -48,7 +48,7 @@ export const ComplaintModal: React.FC<ComplaintModalProps> = ({ fine, onConfirm,
                 <p>Beløp: {fine.amount} kr</p>
                 <p className="text-xs text-slate-400 mt-1">{new Date(fine.date).toLocaleDateString()}</p>
             </div>
-          
+
             <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Begrunnelse for klage</label>
                 <textarea

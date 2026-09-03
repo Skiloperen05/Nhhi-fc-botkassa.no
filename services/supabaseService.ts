@@ -1,48 +1,61 @@
 
-import { createClient, RealtimeChannel } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
-const ACTIVE_SUPABASE_URL = 'https://qnwjhheoekpqqqhevztw.supabase.co';
-const ACTIVE_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_RqAMOlXY2TK012WTAyw3Yw_Js1VYXpz';
+import { resolveCloudConfig, isValidUrl, isValidKey } from './cloudConfig';
+const { url: SUPABASE_URL, key: SUPABASE_KEY } = resolveCloudConfig(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
+export const isCloudConfigured = Boolean(isValidUrl(SUPABASE_URL) && isValidKey(SUPABASE_KEY));
 
-const SUPABASE_URL = ACTIVE_SUPABASE_URL;
-const SUPABASE_KEY = ACTIVE_SUPABASE_PUBLISHABLE_KEY;
+export const supabase = isCloudConfigured ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  throw new Error('Supabase mangler VITE_SUPABASE_URL eller VITE_SUPABASE_PUBLISHABLE_KEY.');
+const PREFIX = 'nhhi_v3_';
+
+let isCloudOffline = false;
+let lastOfflineCheck = 0;
+const OFFLINE_COOLDOWN_MS = 60000;
+
+function checkIsOffline(): boolean {
+  if (!isCloudOffline) return false;
+  if (Date.now() - lastOfflineCheck > OFFLINE_COOLDOWN_MS) {
+    isCloudOffline = false;
+    return false;
+  }
+  return true;
 }
 
-if (SUPABASE_KEY.startsWith('sb_secret_')) {
-  throw new Error('Supabase secret key kan ikke brukes i nettleseren. Bruk en publishable key.');
+function markCloudOffline() {
+  isCloudOffline = true;
+  lastOfflineCheck = Date.now();
 }
-
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-const PREFIX = 'nhhi_v3_'; 
 
 export const cloudSave = async (type: string, id: string, value: any): Promise<boolean> => {
+  if (!supabase || checkIsOffline()) return false;
   const key = `${PREFIX}${type}_${id}`;
   try {
     const { error } = await supabase
       .from('app_data')
-      .upsert({ 
-        key, 
-        value, 
-        updated_at: new Date().toISOString() 
+      .upsert({
+        key,
+        value,
+        updated_at: new Date().toISOString()
       }, { onConflict: 'key' });
-    
+
     if (error) {
-      console.error(`❌ Supabase Save Error [${type}]:`, error.message);
+      if (error.message?.includes('Load failed') || error.message?.includes('Failed to fetch')) {
+        markCloudOffline();
+      }
       return false;
     }
     return true;
-  } catch (err) {
+  } catch (err: any) {
+    markCloudOffline();
     return false;
   }
 };
 
 export const cloudSaveBulk = async (type: string, items: {id: string, [key: string]: any}[]): Promise<boolean> => {
   if (items.length === 0) return true;
-  
+  if (!supabase || checkIsOffline()) return false;
+
   const rows = items.map(item => ({
     key: `${PREFIX}${type}_${item.id}`,
     value: item,
@@ -53,59 +66,95 @@ export const cloudSaveBulk = async (type: string, items: {id: string, [key: stri
     const { error } = await supabase
       .from('app_data')
       .upsert(rows, { onConflict: 'key' });
-    
+
     if (error) {
-      console.error(`❌ Bulk Save Error [${type}]:`, error.message);
+      if (error.message?.includes('Load failed') || error.message?.includes('Failed to fetch')) {
+        markCloudOffline();
+      }
       return false;
     }
     return true;
   } catch (err) {
+    markCloudOffline();
     return false;
   }
 };
 
 export const cloudDelete = async (type: string, id: string): Promise<boolean> => {
+  if (!supabase || checkIsOffline()) return false;
   const key = `${PREFIX}${type}_${id}`;
   try {
     const { error } = await supabase
       .from('app_data')
       .delete()
       .eq('key', key);
+    if (error) {
+      if (error.message?.includes('Load failed') || error.message?.includes('Failed to fetch')) {
+        markCloudOffline();
+      }
+      return false;
+    }
     return !error;
   } catch (e) {
+    markCloudOffline();
     return false;
   }
 };
 
-export const cloudFetchAll = async (type: string): Promise<any[]> => {
+export const cloudFetchAll = async (type: string): Promise<any[] | null> => {
+  if (!supabase) return null;
   try {
     const { data, error } = await supabase
       .from('app_data')
       .select('value')
       .like('key', `${PREFIX}${type}_%`);
-    
+
     if (error) {
-      console.error(`❌ Fetch Error [${type}]:`, error.message);
-      throw error; // Kast feil slik at App.tsx ikke behandler [] som en gyldig tom liste
+      if (error.message?.includes('Load failed') || error.message?.includes('Failed to fetch')) {
+        markCloudOffline();
+      }
+      return null;
     }
-    
+
     if (!data) return [];
+    isCloudOffline = false;
     return data.map(item => item.value);
-  } catch (err) {
-    console.error(`❌ Cloud exception [${type}]:`, err);
-    throw err; 
+  } catch (err: any) {
+    markCloudOffline();
+    return null;
   }
 };
 
-export const subscribeToCloudChanges = (onUpdate: () => void): RealtimeChannel => {
-  return supabase
-    .channel('nhhi-realtime-v3')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'app_data' },
-      () => {
-        onUpdate();
+export const subscribeToCloudChanges = (onUpdate: () => void): { unsubscribe: () => void } => {
+  if (!supabase || checkIsOffline()) {
+    return { unsubscribe: () => {} };
+  }
+  try {
+    const channel = supabase
+      .channel('nhhi-realtime-v3')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'app_data' },
+        () => {
+          onUpdate();
+        }
+      );
+
+    channel.subscribe((status, err) => {
+      if (err) {
+        console.warn('Realtime subscription notice:', err.message || err);
       }
-    )
-    .subscribe();
+    });
+
+    return {
+      unsubscribe: () => {
+        try {
+          supabase.removeChannel(channel);
+        } catch {}
+      }
+    };
+  } catch (e) {
+    console.warn('Realtime subscription error:', e);
+    return { unsubscribe: () => {} };
+  }
 };

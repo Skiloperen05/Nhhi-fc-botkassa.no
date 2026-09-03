@@ -57,8 +57,8 @@ export const ArchiveView: React.FC<ArchiveViewProps> = ({ fines, players, onBack
                           {monthFines.map(f => {
                               const p = players.find(x => x.id === f.playerId);
                               return (
-                                  <button 
-                                    key={f.id} 
+                                  <button
+                                    key={f.id}
                                     onClick={() => onSelectFine(f.id)}
                                     className="w-full flex justify-between items-center p-5 bg-white rounded-3xl shadow-sm border border-slate-100 hover:border-blue-200 transition-all text-left"
                                   >

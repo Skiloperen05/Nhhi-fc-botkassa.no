@@ -3,10 +3,11 @@ import { useSaveAction } from '../hooks/useSaveAction';
 import { SaveStatus } from './SaveStatus';
 import React, { useState } from 'react';
 import { FineEntry, Player, Comment, Reaction, PresetFine } from '../types';
-import { ChevronLeft, User, Calendar, Quote, MessageSquare, Send, SmilePlus, Trash2, Settings, DollarSign, MessageCircleWarning, Info, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, User, Calendar, Quote, MessageSquare, Send, SmilePlus, Trash2, Settings, DollarSign, MessageCircleWarning, Info, CheckCircle2, FileX2, RotateCcw } from 'lucide-react';
 import { Button } from './Button';
 import { EditFineModal } from './EditFineModal';
 import { ComplaintModal } from './ComplaintModal';
+import { WaiveFineModal } from './WaiveFineModal';
 
 interface FineDetailViewProps {
   fine: FineEntry;
@@ -22,6 +23,8 @@ interface FineDetailViewProps {
   onUpdateFine: (fine: FineEntry) => Promise<boolean>;
   onDeleteFine: (fineId: string) => Promise<boolean>;
   onAdminPay: (fineId: string) => Promise<boolean>;
+  onAdminWaive: (fineId: string, reason?: string) => Promise<boolean>;
+  onAdminReopen: (fineId: string) => Promise<boolean>;
 }
 
 const REACTION_EMOJIS = ['👍', '👎', '😄', '❤️', '🍺', '⚽', '🟥', '🔥', '💀'];
@@ -52,8 +55,8 @@ const ReactionPicker: React.FC<{
           disabled={disabled}
           onClick={() => onToggle(emoji)}
           className={`flex items-center space-x-1 px-2 py-1 rounded-full text-sm border transition-all ${
-            userReacted[emoji] 
-              ? 'bg-blue-100 border-blue-300 text-blue-800' 
+            userReacted[emoji]
+              ? 'bg-blue-100 border-blue-300 text-blue-800'
               : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
           }`}
         >
@@ -73,8 +76,8 @@ const ReactionPicker: React.FC<{
 
         {showPicker && (
           <>
-            <div 
-              className="fixed inset-0 z-10" 
+            <div
+              className="fixed inset-0 z-10"
               onClick={() => setShowPicker(false)}
             ></div>
             <div className="absolute top-10 left-0 z-20 bg-white shadow-xl border border-slate-100 rounded-xl p-2 flex gap-1 animate-in fade-in zoom-in duration-200 min-w-[280px] flex-wrap">
@@ -100,27 +103,32 @@ const ReactionPicker: React.FC<{
   );
 };
 
-export const FineDetailView: React.FC<FineDetailViewProps> = ({ 
-  fine, 
-  player, 
-  currentUser, 
+export const FineDetailView: React.FC<FineDetailViewProps> = ({
+  fine,
+  player,
+  currentUser,
   presetFines,
-  onBack, 
-  onGoToProfile, 
+  onBack,
+  onGoToProfile,
   onAddComment,
   onDeleteComment,
   onToggleFineReaction,
   onToggleCommentReaction,
   onUpdateFine,
   onDeleteFine,
-  onAdminPay
+  onAdminPay,
+  onAdminWaive,
+  onAdminReopen,
 }) => {
   const { isSaving, saveError, runSave } = useSaveAction();
   const [commentText, setCommentText] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [showComplaintModal, setShowComplaintModal] = useState(false);
-  
+  const [showWaiveModal, setShowWaiveModal] = useState(false);
+
   const isPaid = fine.status === 'paid';
+  const isWaived = fine.status === 'waived';
+  const isUnpaid = fine.status === 'unpaid';
   const isAdmin = currentUser?.role === 'admin';
   const isMine = currentUser?.id === player.id;
   const hasPendingAction = fine.complaint?.status === 'pending' || fine.payRequest?.status === 'pending';
@@ -148,7 +156,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
       <div className="bg-blue-900 p-4 rounded-2xl shadow-sm text-white">
         <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-2">
-                <button 
+                <button
                 aria-label="Tilbake"
                 onClick={onBack}
                 className="p-2 -ml-2 rounded-full hover:bg-blue-800 text-blue-100 transition-colors"
@@ -157,9 +165,9 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                 </button>
                 <h2 className="text-xl font-bold text-white">Botdetaljer</h2>
             </div>
-            
+
             {isAdmin && (
-                <button 
+                <button
                     onClick={() => setShowEditModal(true)}
                     className="p-2 bg-blue-800 text-blue-100 rounded-lg hover:bg-blue-700 transition-colors"
                     title="Innstillinger for bot"
@@ -174,7 +182,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
             <div className="mt-6 flex gap-3 animate-in fade-in slide-in-from-bottom-2">
                 {!hasPendingAction ? (
                     <>
-                        <button 
+                        <button
                             disabled={isSaving}
                             onClick={handlePayRequest}
                             className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700 border border-green-500 rounded-2xl text-xs font-black uppercase transition-all shadow-lg active:scale-95"
@@ -182,7 +190,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                             <DollarSign size={16} />
                             Betalt
                         </button>
-                        <button 
+                        <button
                             onClick={() => setShowComplaintModal(true)}
                             className="flex-1 flex items-center justify-center gap-2 py-3 bg-amber-500 hover:bg-amber-600 border border-amber-400 rounded-2xl text-xs font-black uppercase transition-all shadow-lg active:scale-95"
                         >
@@ -198,10 +206,26 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                 )}
             </div>
         )}
-        
+
         {isPaid && (
             <div className="mt-4 flex items-center justify-center gap-2 text-green-400 text-[10px] font-black uppercase tracking-widest bg-white/5 py-2 rounded-xl">
                 <CheckCircle2 size={14} /> Denne boten er gjort opp for.
+            </div>
+        )}
+
+        {isWaived && (
+            <div className="mt-4 flex flex-col items-center justify-center gap-1 text-purple-200 text-[11px] font-bold bg-white/10 py-3 px-4 rounded-2xl border border-white/15 text-center">
+                <div className="flex items-center gap-1.5 text-purple-300 uppercase tracking-widest font-black text-[10px]">
+                    <FileX2 size={14} /> Boten er ettergitt / tapsført
+                </div>
+                {fine.waivedReason && (
+                    <div className="text-white/90 font-normal italic text-xs">«{fine.waivedReason}»</div>
+                )}
+                {fine.waivedDate && (
+                    <div className="text-[9px] text-white/50 uppercase tracking-wider font-semibold mt-0.5">
+                        Registrert {new Date(fine.waivedDate).toLocaleDateString('nb-NO')}
+                    </div>
+                )}
             </div>
         )}
       </div>
@@ -212,10 +236,15 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
             {/* Amount */}
             <div className="mt-4 mb-2">
                 <div className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Beløp</div>
-                <div className="text-5xl font-black text-slate-900 tracking-tighter flex justify-center items-start">
+                <div className={`text-5xl font-black tracking-tighter flex justify-center items-start ${isWaived ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
                     {fine.amount}
                     <span className="text-lg font-medium text-slate-400 mt-2 ml-1">kr</span>
                 </div>
+                {isWaived && (
+                    <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-black uppercase px-2.5 py-0.5 bg-purple-50 text-purple-700 rounded-full border border-purple-200 tracking-wider">
+                        <FileX2 size={11} /> Tapsført (0 kr utestående)
+                    </div>
+                )}
             </div>
 
             <div className="w-full border-t border-slate-100 my-6"></div>
@@ -228,15 +257,38 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                 )}
             </div>
 
-            {/* Admin Quick Pay Button if Unpaid */}
-            {isAdmin && !isPaid && (
-                <div className="mb-4">
-                    <button 
+            {/* Admin Actions (Pay / Waive / Reopen) */}
+            {isAdmin && isUnpaid && (
+                <div className="mb-4 flex items-center justify-center gap-2 flex-wrap">
+                    <button
                         disabled={isSaving} onClick={() => runSave(() => onAdminPay(fine.id))}
                         className="inline-flex items-center px-4 py-2 bg-green-50 text-green-700 rounded-full text-[10px] font-black border border-green-200 hover:bg-green-100 transition-colors uppercase tracking-widest"
                     >
                         <DollarSign size={14} className="mr-1.5" />
                         BEKREFT BETALING
+                    </button>
+                    {onAdminWaive && (
+                        <button
+                            onClick={() => setShowWaiveModal(true)}
+                            className="inline-flex items-center px-4 py-2 bg-purple-50 text-purple-700 rounded-full text-[10px] font-black border border-purple-200 hover:bg-purple-100 transition-colors uppercase tracking-widest"
+                            title="Tapsfør bot hvis du anser den som uinnkrevbar"
+                        >
+                            <FileX2 size={14} className="mr-1.5" />
+                            ETTERGI / TAPSFØR
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {isAdmin && isWaived && onAdminReopen && (
+                <div className="mb-4">
+                    <button
+                        disabled={isSaving} onClick={() => runSave(() => onAdminReopen(fine.id))}
+                        className="inline-flex items-center px-4 py-2 bg-slate-100 text-slate-700 rounded-full text-[10px] font-black border border-slate-200 hover:bg-slate-200 transition-colors uppercase tracking-widest"
+                        title="Gjenåpne boten som aktiv ubetalt gjeld"
+                    >
+                        <RotateCcw size={14} className="mr-1.5" />
+                        GJENÅPNE SOM UBETALT
                     </button>
                 </div>
             )}
@@ -244,8 +296,8 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
             {/* Reactions on Fine */}
             {currentUser && (
                <div className="flex justify-center mb-6">
-                  <ReactionPicker 
-                    reactions={fine.reactions} 
+                  <ReactionPicker
+                    reactions={fine.reactions}
                     disabled={isSaving}
                     onToggle={(emoji) => runSave(() => onToggleFineReaction(fine.id, emoji))}
                     currentUserId={currentUser.id}
@@ -279,7 +331,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
 
             {/* Actions */}
             <div className="space-y-3">
-                <Button 
+                <Button
                     onClick={() => onGoToProfile(player.id)}
                     variant="secondary"
                     fullWidth
@@ -314,9 +366,9 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                                     <span className="text-[10px] text-slate-400">{new Date(comment.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                 </div>
                                 <p className="text-slate-700 text-sm leading-relaxed">{comment.text}</p>
-                                
+
                                 {currentUser && (
-                                  <ReactionPicker 
+                                  <ReactionPicker
                                     reactions={comment.reactions}
                                     disabled={isSaving}
                                     onToggle={(emoji) => runSave(() => onToggleCommentReaction(fine.id, comment.id, emoji))}
@@ -324,7 +376,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                                   />
                                 )}
                             </div>
-                            
+
                             {currentUser && (currentUser.role === 'admin' || currentUser.id === comment.userId) && (
                                 <button
                                     disabled={isSaving}
@@ -347,15 +399,15 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
 
             {currentUser && (
                 <form onSubmit={handleSendComment} className="relative">
-                    <input 
-                        type="text" 
+                    <input
+                        type="text"
                         disabled={isSaving}
                         value={commentText}
                         onChange={(e) => setCommentText(e.target.value)}
                         placeholder="Skriv en kommentar..."
                         className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
-                    <button 
+                    <button
                         type="submit"
                         disabled={isSaving || !commentText.trim()}
                         className="absolute right-2 top-2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors shadow-sm"
@@ -368,7 +420,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
       </div>
 
       {showEditModal && isAdmin && (
-          <EditFineModal 
+          <EditFineModal
             fine={fine}
             presetFines={presetFines}
             onSave={onUpdateFine}
@@ -378,10 +430,19 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
       )}
 
       {showComplaintModal && (
-          <ComplaintModal 
+          <ComplaintModal
             fine={fine}
             onConfirm={(fid, r) => handleComplaintSubmit(fid, r)}
             onCancel={() => setShowComplaintModal(false)}
+          />
+      )}
+
+      {showWaiveModal && onAdminWaive && (
+          <WaiveFineModal
+            fine={fine}
+            player={player}
+            onConfirm={(reason) => onAdminWaive(fine.id, reason)}
+            onCancel={() => setShowWaiveModal(false)}
           />
       )}
     </div>

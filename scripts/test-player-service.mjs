@@ -22,6 +22,7 @@ try {
     'tests/historyService.test.ts',
     'tests/finePersistenceService.test.ts',
     'tests/dateService.test.ts',
+    'tests/cloudConfig.test.ts',
     '--module', 'commonjs',
     '--moduleResolution', 'node',
     '--target', 'es2022',
@@ -35,6 +36,7 @@ try {
     join(outputDir, 'tests', 'historyService.test.js'),
     join(outputDir, 'tests', 'finePersistenceService.test.js'),
     join(outputDir, 'tests', 'dateService.test.js'),
+    join(outputDir, 'tests', 'cloudConfig.test.js'),
   ]);
 } finally {
   rmSync(outputDir, { recursive: true, force: true });

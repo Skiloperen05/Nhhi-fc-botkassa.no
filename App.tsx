@@ -18,7 +18,7 @@ import { storage } from './services/storageService';
 import { getFineHistory } from './services/historyService';
 import { archiveFinesSafely, preparePaymentRequests } from './services/finePersistenceService';
 import { cloudSave, cloudDelete, cloudFetchAll, subscribeToCloudChanges, cloudSaveBulk } from './services/supabaseService';
-import { PlusCircle, BarChart3, Shield, Table, LogOut, Bell, Settings, Search, Loader2, CheckCircle2, Cloud, AlertTriangle, Mail, Menu, RefreshCw } from 'lucide-react';
+import { PlusCircle, BarChart3, Shield, Table, LogOut, Bell, Settings, Search, Loader2, CheckCircle2, Cloud, AlertTriangle, Mail } from 'lucide-react';
 
 import { ACCOUNT_MIGRATION_VERSION, isPlayerActive, normalizeName, normalizePlayerIdentities, repairPlayerAccounts, repairSession } from './services/playerService';
 
@@ -31,7 +31,7 @@ const App: React.FC = () => {
   const [syncError, setSyncError] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState<string | null>(null);
   const [showErrorToast, setShowErrorToast] = useState<string | null>(null);
-  
+
   const [players, setPlayers] = useState<Player[]>([]);
   const [presetFines, setPresetFines] = useState<PresetFine[]>([]);
   const [fines, setFines] = useState<FineEntry[]>([]);
@@ -40,13 +40,12 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<Record<string, UserSettings>>({});
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [globalRules, setGlobalRules] = useState<string>('');
-  
+
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [selectedFineId, setSelectedFineId] = useState<string | null>(null);
   const [fineReturnView, setFineReturnView] = useState<ViewState>('list');
   const [filter, setFilter] = useState<TimeFilter>('all');
   const [listMonthOffset, setListMonthOffset] = useState(0);
-  const [showActionsMenu, setShowActionsMenu] = useState(false);
   const fineReturnScrollRef = useRef(0);
   const restoreFineScrollRef = useRef(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -124,7 +123,7 @@ const App: React.FC = () => {
     const loadedRoles = storage.get<RoleDefinition[]>('roles', DEFAULT_ROLES);
     const loadedSettings = storage.get<Record<string, UserSettings>>('settings', {});
     const loadedRules = storage.get<string>('global_rules', '');
-    
+
     const storedPlayers = storage.get<Player[]>('players', []);
     const migrationVersion = storage.get<number>('account_migration_version', 0);
     const finalPlayers = migrationVersion < ACCOUNT_MIGRATION_VERSION && storedPlayers.length > 0
@@ -144,7 +143,7 @@ const App: React.FC = () => {
     setRoles(loadedRoles);
     setSettings(loadedSettings);
     setGlobalRules(loadedRules);
-    
+
     if (loadedUser) {
       setUser(loadedUser);
       const p = finalPlayers.find(pl => pl.id === loadedUser.id);
@@ -205,7 +204,7 @@ const App: React.FC = () => {
     const version = mutationVersionRef.current;
     const sequence = ++syncSequenceRef.current;
     if (!silent) setIsSyncing(true);
-    
+
     try {
       const [cloudFines, cloudArchived, cloudPlayers, cloudPresets, cloudRoles, cloudSettings, cloudMessages, cloudRules] = (await Promise.all([
         cloudFetchAll('fine'),
@@ -218,6 +217,9 @@ const App: React.FC = () => {
         cloudFetchAll('global')
       ])) as [FineEntry[], FineEntry[], Player[], PresetFine[], RoleDefinition[], any[], Message[], any[]];
 
+      if ([cloudFines, cloudArchived, cloudPlayers, cloudPresets, cloudRoles, cloudSettings, cloudMessages, cloudRules].some(result => result === null)) {
+        throw new Error('Cloud snapshot incomplete; keeping the previous local snapshot.');
+      }
       // A fetch begun before a write must not overwrite that write with an older response.
       if (version !== mutationVersionRef.current || sequence !== syncSequenceRef.current) return;
       setArchivedFines(cloudArchived);
@@ -282,6 +284,13 @@ const App: React.FC = () => {
     return true;
   });
 
+  const saveBulkFines = async (newFines: FineEntry[]): Promise<boolean> => runMutation(async () => {
+    if (!newFines.every(fine => activePlayers.some(player => player.id === fine.playerId))) return false;
+    if (!await cloudSaveBulk('fine', newFines)) return false;
+    mergeFineUpdates('fine', newFines);
+    return true;
+  });
+
   const handlePayAllRequest = async (ids: string[]): Promise<boolean> => runMutation(async () => {
     const { fineUpdates, archiveUpdates } = preparePaymentRequests(ids, fines, archivedFines, new Date().toISOString());
     let savedCount = 0;
@@ -333,11 +342,11 @@ const App: React.FC = () => {
     if (player && !player.hasChangedPassword) setMustChangePassword(true);
     setUser(u);
     storage.save('session_user', u);
-    if(u.role === 'admin') setView('overview'); 
+    if(u.role === 'admin') setView('overview');
     else { setSelectedPlayerId(u.id); setView('player'); }
   };
 
-  const handleLogout = () => { 
+  const handleLogout = () => {
     setUser(null); storage.remove('session_user'); setView('login'); setSelectedPlayerId(null); setMustChangePassword(false);
   };
 
@@ -503,14 +512,15 @@ const App: React.FC = () => {
     const uniqueFinesMap = new Map<string, FineEntry>();
     historyFines.forEach(f => uniqueFinesMap.set(f.id, f));
     const allUniqueFines = Array.from(uniqueFinesMap.values());
-    
+
     const targetFines = user?.role === 'admin' ? allUniqueFines : allUniqueFines.filter(f => f.playerId === user?.id);
     const debt = targetFines.filter(f => f.status === 'unpaid').reduce((a, b) => a + b.amount, 0);
     const paid = targetFines.filter(f => f.status === 'paid').reduce((a, b) => a + b.amount, 0);
+    const waived = targetFines.filter(f => f.status === 'waived').reduce((a, b) => a + b.amount, 0);
     const total = debt + paid;
     const percent = total > 0 ? Math.round((paid / total) * 100) : 0;
-    
-    return { debt, paid, total, percent };
+
+    return { debt, paid, waived, total, percent };
   }, [user, historyFines]);
 
   if (isLoading) {
@@ -531,124 +541,290 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-24">
+    <div className={`min-h-screen bg-slate-50 text-slate-900 font-sans ${view === 'add' ? 'h-[100dvh] overflow-hidden md:h-auto md:min-h-screen md:overflow-visible pb-0 md:pb-32 flex flex-col' : 'pb-24'}`}>
       {showSuccessToast && (
-        <div role="status" className="fixed top-4 left-1/2 -translate-x-1/2 w-max max-w-[calc(100%-2rem)] z-[100] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
           <CheckCircle2 size={16} className="text-green-400" />
           <span className="text-xs font-bold uppercase">{showSuccessToast}</span>
         </div>
       )}
 
       {showErrorToast && (
-        <div role="alert" className="fixed top-4 left-1/2 -translate-x-1/2 w-max max-w-[calc(100%-2rem)] z-[100] bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
           <AlertTriangle size={16} />
           <span className="text-xs font-bold uppercase">{showErrorToast}</span>
         </div>
       )}
 
-      {user && (
-        <header className="bg-blue-900 text-white px-4 pt-5 pb-9 rounded-b-[2rem] shadow-lg">
-          <div className="max-w-lg mx-auto">
-            <div className="flex justify-between items-center gap-3 mb-4">
-              <div className="min-w-0">
-                <h1 className="text-xl font-black tracking-tight">NHHI FC</h1>
-                <p className="text-blue-200 text-xs truncate">{user.name}</p>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button aria-label="Søk etter spiller" title="Søk etter spiller" onClick={() => setShowSearchModal(true)} className="p-3 rounded-xl hover:bg-blue-800"><Search size={20} /></button>
-                <button aria-label="Varsler og meldinger" title="Varsler og meldinger" onClick={() => setView('notifications')} className="p-3 rounded-xl hover:bg-blue-800"><Bell size={20} /></button>
-                <div className="relative">
-                  <button aria-label="Åpne meny" aria-expanded={showActionsMenu} onClick={() => setShowActionsMenu(!showActionsMenu)} className="p-3 rounded-xl hover:bg-blue-800"><Menu size={20} /></button>
-                  {showActionsMenu && <>
-                    <button aria-label="Lukk meny" onClick={() => setShowActionsMenu(false)} className="fixed inset-0 z-[60] cursor-default" />
-                    <div className="absolute right-0 top-full mt-2 w-56 bg-white text-slate-800 rounded-2xl shadow-xl border border-slate-100 p-2 z-[70]">
-                      <button onClick={() => { setShowActionsMenu(false); setShowSettingsModal(true); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 text-sm"><Settings size={18} />Innstillinger</button>
-                      {user.role === 'admin' && <button onClick={() => { setShowActionsMenu(false); messageDraftIdRef.current = null; setShowSendMessageModal(true); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 text-sm"><Mail size={18} />Send melding</button>}
-                      <button disabled={isSyncing || isSaving} onClick={() => { setShowActionsMenu(false); void syncFromCloud(); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 text-sm disabled:opacity-50"><RefreshCw size={18} />Oppdater data</button>
-                      <button onClick={() => { setShowActionsMenu(false); handleLogout(); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 text-sm"><LogOut size={18} />Logg ut</button>
-                    </div>
-                  </>}
-                </div>
-              </div>
+      {/* COMPACT MOBILE HEADER FOR 'ADD' VIEW (Takes minimal vertical space so everything fits without scrolling) */}
+      {user && view === 'add' && (
+        <header className="md:hidden bg-blue-900 text-white px-3.5 py-2 flex items-center justify-between shadow-sm flex-none z-30">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-white/10 border border-white/10 text-blue-200">
+              {user.role === 'admin' ? 'Botsjef' : 'Spiller'}
+            </span>
+            <h1 className="text-base font-black tracking-tight leading-none">Gi bot</h1>
+            <button aria-label="Oppdater data" disabled={isSyncing || isSaving} onClick={() => syncFromCloud()} className={`p-1 rounded-full ${isSyncing ? 'animate-pulse text-amber-400' : syncError ? 'text-red-300' : 'text-green-400'}`}>
+              <Cloud size={13} />
+            </button>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <div className="text-right">
+              <span className="block text-[8px] font-black uppercase tracking-wider text-blue-300">Lagkassen</span>
+              <span className="block text-xs font-black tracking-tight text-white leading-none">{headerStats.total.toLocaleString('nb-NO')} kr</span>
             </div>
-            <div className="bg-white/10 rounded-2xl p-4 border border-white/10">
-              <div className="flex justify-between items-center text-[10px] text-blue-200 mb-3">
-                <span>{user.role === 'admin' ? 'Hele laget · all historikk' : 'Dine bøter · all historikk'}</span>
-                <span role="status" className="flex items-center gap-1">
-                  {(isSaving || isSyncing) ? <Loader2 size={12} className="animate-spin" /> : syncError ? <AlertTriangle size={12} /> : <Cloud size={12} />}
-                  {isSaving ? 'Lagrer…' : isSyncing ? 'Oppdaterer…' : syncError ? 'Ikke oppdatert' : 'Oppdatert'}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div><p className="text-blue-200 text-[10px] mb-1">Utestående</p><p className="text-lg sm:text-xl font-black whitespace-nowrap">{headerStats.debt.toLocaleString('nb-NO')} kr</p></div>
-                <div><p className="text-blue-200 text-[10px] mb-1">Totalt påløpt</p><p className="text-lg sm:text-xl font-black whitespace-nowrap">{headerStats.total.toLocaleString('nb-NO')} kr</p></div>
-                <div><p className="text-green-200 text-[10px] mb-1">Betalt</p><p className="text-lg sm:text-xl font-black text-green-200 whitespace-nowrap">{headerStats.paid.toLocaleString('nb-NO')} kr</p></div>
-              </div>
-              <div className="mt-3 h-1.5 bg-white/10 rounded-full overflow-hidden" role="progressbar" aria-label="Andel betalt" aria-valuenow={headerStats.percent} aria-valuemin={0} aria-valuemax={100}>
-                <div className="h-full bg-emerald-400 transition-all" style={{ width: `${headerStats.percent}%` }} />
-              </div>
-              <p className="text-[10px] text-blue-200 mt-1 text-right">{headerStats.percent}% betalt</p>
-            </div>
+            <button aria-label="Søk etter spiller" onClick={() => setShowSearchModal(true)} className="p-1.5 bg-blue-800/80 rounded-lg hover:bg-blue-700 transition-colors">
+              <Search size={14} />
+            </button>
+            <button aria-label="Innstillinger" onClick={() => setShowSettingsModal(true)} className="p-1.5 bg-blue-800/80 rounded-lg hover:bg-blue-700 transition-colors">
+              <Settings size={14} />
+            </button>
           </div>
         </header>
       )}
 
-      <main className={`px-4 max-w-lg mx-auto ${user ? '-mt-5 relative z-20' : ''}`}>
+      {user && (
+        <header className={`bg-blue-900 text-white ${view === 'add' ? 'hidden md:block pt-8 pb-12' : 'pt-10 pb-16'} px-6 rounded-b-[3.5rem] shadow-xl relative overflow-hidden flex-none`}>
+            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none -rotate-12"><Shield size={280} /></div>
+            <div className="relative z-10 max-w-6xl mx-auto">
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <div className="flex items-center space-x-2 mb-2">
+                            <button aria-label="Innstillinger" onClick={() => setShowSettingsModal(true)} className="p-2 bg-blue-800 rounded-xl hover:bg-blue-700 transition-colors"><Settings size={16} /></button>
+                            <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase bg-white/10 border border-white/10">
+                              {user.role === 'admin' ? 'Botsjef' : 'Spiller'}
+                            </span>
+                            <button aria-label="Oppdater data" disabled={isSyncing || isSaving} onClick={() => syncFromCloud()} className={`p-2 rounded-full ${isSyncing ? 'animate-pulse text-amber-400' : syncError ? 'text-red-300' : 'text-green-400'}`}>
+                                <Cloud size={14} />
+                            </button>
+                        </div>
+                        <h1 className="text-2xl font-black tracking-tight">{view === 'add' ? 'Gi bot' : 'NHHI FC'}</h1>
+                        <p className="text-blue-200 text-xs">{view === 'add' ? 'Registrer bot på spillere' : user.name}</p>
+                    </div>
+
+                    {/* PC Desktop Navigation Bar (skrivebordsvisning) */}
+                    <div className="hidden md:flex items-center bg-blue-950/70 p-1.5 rounded-2xl border border-white/10 shadow-inner">
+                      {user.role === 'admin' && (
+                        <button
+                          onClick={() => setView('add')}
+                          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                            view === 'add' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-200 hover:text-white hover:bg-white/5'
+                          }`}
+                        >
+                          <PlusCircle size={16} />
+                          <span>Gi Bot</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setView('overview')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                          view === 'overview' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-200 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <BarChart3 size={16} />
+                        <span>Oversikt</span>
+                      </button>
+                      <button
+                        onClick={() => setView('list')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                          view === 'list' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-200 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <Table size={16} />
+                        <span>Bøteliste</span>
+                      </button>
+                      <button
+                        onClick={() => { setSelectedPlayerId(user.id); setView('player'); }}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                          view === 'player' && selectedPlayerId === user.id ? 'bg-blue-600 text-white shadow-md' : 'text-blue-200 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <Shield size={16} />
+                        <span>Min Profil</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                        {view === 'add' && (
+                          <div className="text-right mr-1">
+                            <div className="text-[9px] font-black uppercase tracking-wider text-blue-300">Lagkassen</div>
+                            <div className="text-base font-black tracking-tight text-white">{headerStats.total.toLocaleString('nb-NO')} kr</div>
+                          </div>
+                        )}
+                        <button aria-label="Søk etter spiller" onClick={() => setShowSearchModal(true)} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors"><Search size={20} /></button>
+                        {user.role === 'admin' && (
+                          <button onClick={() => setShowSendMessageModal(true)} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors">
+                            <Mail size={20} />
+                          </button>
+                        )}
+                        <button onClick={() => setView('notifications')} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors"><Bell size={20} /></button>
+                        <button aria-label="Logg ut" onClick={handleLogout} className="p-2.5 bg-blue-800 rounded-2xl hover:bg-blue-700 transition-colors"><LogOut size={20} /></button>
+                    </div>
+                </div>
+
+                {/* --- OPPDATERT HEADER-STRUKTUR (TOTAL & PROGRESS) --- */}
+                {view !== 'add' && (
+                  <div className="space-y-4">
+                    <div className="bg-white/5 backdrop-blur-md rounded-[2.5rem] p-6 border border-white/10 shadow-inner">
+                        <div className="flex justify-between items-end mb-4">
+                            <div className="text-center flex-1">
+                                <div className="text-blue-300 text-[10px] font-black uppercase mb-1">Gjeld</div>
+                                <div className="text-2xl font-black">{headerStats.debt.toLocaleString()} kr</div>
+                                {headerStats.waived > 0 && (
+                                  <div className="text-[10px] text-purple-300 font-bold mt-0.5">({headerStats.waived.toLocaleString()} kr tapt)</div>
+                                )}
+                            </div>
+
+                            <div className="px-4 text-center">
+                                <div className="text-white/40 text-[9px] font-black uppercase mb-1">Total påløpt</div>
+                                <div className="text-sm font-black text-amber-400">{(headerStats.total + headerStats.waived).toLocaleString()} kr</div>
+                            </div>
+
+                            <div className="text-center flex-1">
+                                <div className="text-green-300 text-[10px] font-black uppercase mb-1">Betalt</div>
+                                <div className="text-2xl font-black">{headerStats.paid.toLocaleString()} kr</div>
+                            </div>
+                        </div>
+
+                        {/* Innkrevingsgrad progress bar */}
+                        <div className="space-y-1.5">
+                            <div className="flex justify-between items-center px-1">
+                                <span className="text-[9px] font-black text-blue-300 uppercase">Innkrevingsgrad</span>
+                                <span className="text-[9px] font-black text-green-300 uppercase">{headerStats.percent}%</span>
+                            </div>
+                            <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(16,185,129,0.3)]"
+                                    style={{ width: `${headerStats.percent}%` }}
+                                ></div>
+                            </div>
+                        </div>
+                    </div>
+                  </div>
+                )}
+            </div>
+        </header>
+      )}
+
+      <main className={`w-full ${user ? (view === 'add' ? 'flex-1 min-h-0 overflow-hidden md:overflow-visible px-2 pt-1 pb-[4.75rem] md:pb-8 md:p-6 md:max-w-6xl md:mx-auto md:-mt-8 relative z-20 flex flex-col' : 'px-4 max-w-lg md:max-w-6xl mx-auto -mt-10 md:-mt-8 relative z-20') : ''}`}>
         {syncError && <div role="alert" className="mb-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-sm">
           Kunne ikke hente siste oppdatering. Viser sist lagrede data.
           <button disabled={isSaving || isSyncing} onClick={() => void syncFromCloud()} className="ml-2 underline font-semibold">Prøv igjen</button>
         </div>}
+        {isSaving && <p role="status" className="text-xs text-blue-600 py-2">Lagrer …</p>}
         {!user ? (
             <div className="mt-20">
               <LoginView onLogin={handleLogin} players={activePlayers} />
             </div>
         ) : (
-            view === 'add' ? <AddFineView onAddFine={saveFine} players={activePlayers} presetFines={presetFines} /> :
+            view === 'add' ? (
+              <AddFineView
+                onAddFine={saveFine}
+                onAddFines={saveBulkFines}
+                players={activePlayers}
+                presetFines={presetFines}
+                allFines={historyFines}
+                potTotal={headerStats.total}
+                onTriggerToast={triggerToast}
+              />
+            ) :
             view === 'overview' ? <StatsView fines={historyFines} players={players} onSelectPlayer={(id) => { setSelectedPlayerId(id); setView('player'); }} currentFilter={filter} onFilterChange={setFilter} currentUserRole={user.role} /> :
-            view === 'list' ? <FineListView fines={historyFines} players={players} currentFilter={filter} onFilterChange={setFilter} monthOffset={listMonthOffset} onMonthOffsetChange={setListMonthOffset} onSelectFine={openFine} currentUserRole={user.role} /> :
+            view === 'list' ? (
+              <FineListView
+                fines={historyFines}
+                players={players}
+                currentFilter={filter} onFilterChange={setFilter} monthOffset={listMonthOffset} onMonthOffsetChange={setListMonthOffset}
+                onSelectFine={openFine}
+                currentUserRole={user.role}
+                onAdminPay={(fid) => {
+                  const fine = historyFines.find(x => x.id === fid);
+                  if (fine) return saveFine({ ...fine, status: 'paid', payRequest: undefined });
+                }}
+                onAdminWaive={(fid, reason) => {
+                  const fine = historyFines.find(x => x.id === fid);
+                  if (fine) {
+                    return saveFine({
+                      ...fine,
+                      status: 'waived',
+                      waivedReason: reason,
+                      waivedDate: new Date().toISOString(),
+                      waivedBy: user.name,
+                      payRequest: undefined
+                    });
+                  }
+                }}
+                onAdminReopen={(fid) => {
+                  const fine = historyFines.find(x => x.id === fid);
+                  if (fine) {
+                    return saveFine({
+                      ...fine,
+                      status: 'unpaid',
+                      waivedReason: undefined,
+                      waivedDate: undefined,
+                      waivedBy: undefined
+                    });
+                  }
+                }}
+              />
+            ) :
             view === 'notifications' ? <NotificationsView user={user} fines={historyFines} messages={messages} players={players} /> :
             view === 'archive' ? <ArchiveView fines={archivedFines} players={players} onBack={() => setView('player')} onSelectFine={openFine} /> :
             view === 'fine_detail' ? (
                 currentSelectedFine ? (
-                    <FineDetailView 
-                        fine={currentSelectedFine} 
-                        player={getFineDetailPlayer(currentSelectedFine)} 
-                        currentUser={user} 
-                        presetFines={presetFines} 
+                    <FineDetailView
+                        fine={currentSelectedFine}
+                        player={getFineDetailPlayer(currentSelectedFine)}
+                        currentUser={user}
+                        presetFines={presetFines}
                         onBack={returnFromFine}
-                        onGoToProfile={(id) => { setSelectedPlayerId(id); setView('player'); }} 
+                        onGoToProfile={(id) => { setSelectedPlayerId(id); setView('player'); }}
                         onAddComment={(fid, t) => saveFine({...currentSelectedFine, comments: [...(currentSelectedFine.comments || []), {id: crypto.randomUUID(), userId: user.id, userName: user.name, text: t, timestamp: Date.now()}]})}
                         onDeleteComment={(fid, cid) => saveFine({...currentSelectedFine, comments: (currentSelectedFine.comments || []).filter(c => c.id !== cid)})}
                         onToggleFineReaction={(fid, e) => { const r = currentSelectedFine.reactions || []; const i = r.findIndex(x => x.userId === user.id && x.emoji === e); return saveFine({...currentSelectedFine, reactions: i > -1 ? r.filter((_, idx) => idx !== i) : [...r, {emoji: e, userId: user.id}]}) }}
                         onToggleCommentReaction={(fid, cid, e) => saveFine({...currentSelectedFine, comments: (currentSelectedFine.comments || []).map(c => c.id === cid ? {...c, reactions: (c.reactions || []).findIndex(x => x.userId === user.id && x.emoji === e) > -1 ? (c.reactions || []).filter(x => !(x.userId === user.id && x.emoji === e)) : [...(c.reactions || []), {emoji: e, userId: user.id}]} : c)})}
-                        onUpdateFine={saveFine} 
-                        onDeleteFine={deleteFine} 
-                        onAdminPay={(fid) => saveFine({...currentSelectedFine, status: 'paid', payRequest: undefined})} 
+                        onUpdateFine={saveFine}
+                        onDeleteFine={deleteFine}
+                        onAdminPay={(fid) => saveFine({...currentSelectedFine, status: 'paid', payRequest: undefined})}
+                        onAdminWaive={(fid, reason) => saveFine({
+                          ...currentSelectedFine,
+                          status: 'waived',
+                          waivedReason: reason,
+                          waivedDate: new Date().toISOString(),
+                          waivedBy: user.name,
+                          payRequest: undefined
+                        })}
+                        onAdminReopen={(fid) => saveFine({
+                          ...currentSelectedFine,
+                          status: 'unpaid',
+                          waivedReason: undefined,
+                          waivedDate: undefined,
+                          waivedBy: undefined
+                        })}
                     />
                 ) : null
             ) :
             view === 'player' ? (
                 currentSelectedPlayer ? (
-                    <PlayerProfileView 
-                        player={currentSelectedPlayer} 
-                        currentUserRole={user.role} 
+                    <PlayerProfileView
+                        player={currentSelectedPlayer}
+                        currentUserRole={user.role}
                         currentUserId={user.id}
-                        isOwnProfile={user.id === currentSelectedPlayer.id} 
+                        isOwnProfile={user.id === currentSelectedPlayer.id}
                         fines={historyFines.filter(f => f.playerId === currentSelectedPlayer.id)}
                         allFines={historyFines}
-                        settings={settings[currentSelectedPlayer.id] || { pushEnabled: false }} 
-                        presetFines={presetFines} 
-                        roles={roles} 
+                        settings={settings[currentSelectedPlayer.id] || { pushEnabled: false }}
+                        presetFines={presetFines}
+                        roles={roles}
                         players={players}
-                        onUpdateSettings={handleUpdateSettings} 
-                        onUpdatePlayer={handleUpdatePlayer} 
-                        onBack={() => user.role === 'admin' ? setView('overview') : setView('list')} 
-                        onUpdateFine={saveFine} 
-                        onDeleteFine={deleteFine} 
-                        onSubmitComplaint={(fid, r) => saveFine({...historyFines.find(x => x.id === fid)!, complaint: {reason: r, status: 'pending', date: new Date().toISOString()}})}
-                        onPayRequest={(fid) => saveFine({...historyFines.find(x => x.id === fid)!, payRequest: {status: 'pending', date: new Date().toISOString()}})}
+                        onUpdateSettings={handleUpdateSettings}
+                        onUpdatePlayer={handleUpdatePlayer}
+                        onBack={() => user.role === 'admin' ? setView('overview') : setView('list')}
+                        onUpdateFine={saveFine}
+                        onDeleteFine={deleteFine}
+                        onSubmitComplaint={(fid, r) => saveFine({...(historyFines.find(x => x.id === fid))!, complaint: {reason: r, status: 'pending', date: new Date().toISOString()}})}
+                        onPayRequest={(fid) => saveFine({...(historyFines.find(x => x.id === fid))!, payRequest: {status: 'pending', date: new Date().toISOString()}})}
                         onPayAllRequest={handlePayAllRequest}
-                        onAdminPay={(fid) => saveFine({...historyFines.find(x => x.id === fid)!, status: 'paid', payRequest: undefined})}
+                        onAdminPay={(fid) => saveFine({...(historyFines.find(x => x.id === fid))!, status: 'paid', payRequest: undefined})}
                         onVoteOnComplaint={(fid, vid, v) => handleVoteOnComplaint(fid, vid, v)}
                         onSelectFine={openFine}
                         onOpenArchive={() => setView('archive')}
@@ -659,7 +835,7 @@ const App: React.FC = () => {
       </main>
 
       {user && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-2xl border-t border-slate-200 pb-safe pt-2 z-50">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-2xl border-t border-slate-200 pb-safe pt-2 z-50">
             <div className="flex justify-around items-center max-w-lg mx-auto h-16 px-4">
               {user.role === 'admin' && <button onClick={() => setView('add')} className={`flex flex-col items-center justify-center w-16 h-16 rounded-2xl transition-all ${view === 'add' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><PlusCircle size={22} /><span className="text-[10px] font-black mt-1 uppercase">Gi Bot</span></button>}
               <button onClick={() => setView('overview')} className={`flex flex-col items-center justify-center w-16 h-16 rounded-2xl transition-all ${view === 'overview' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><BarChart3 size={22} /><span className="text-[10px] font-black mt-1 uppercase">Oversikt</span></button>
@@ -672,9 +848,9 @@ const App: React.FC = () => {
       {showSearchModal && <SearchModal players={activePlayers} onSelect={(id) => { setSelectedPlayerId(id); setView('player'); setShowSearchModal(false); }} onClose={() => setShowSearchModal(false)} />}
       {showSendMessageModal && user && <SendMessageModal players={activePlayers} onSend={handleSendMessage} onCancel={() => setShowSendMessageModal(false)} />}
       {showSettingsModal && user && (
-        <SettingsModal 
-          currentUser={user} 
-          settings={settings[user.id] || { pushEnabled: false }} 
+        <SettingsModal
+          currentUser={user}
+          settings={settings[user.id] || { pushEnabled: false }}
           players={activePlayers} presetFines={presetFines} roles={roles}
           globalRules={globalRules}
           onSaveGlobalRules={handleUpdateGlobalRules}

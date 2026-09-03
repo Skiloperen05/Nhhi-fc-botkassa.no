@@ -10,7 +10,7 @@ import { ROLE_COLOR_MAP } from '../constants';
 interface SettingsModalProps {
   currentUser?: User;
   settings: UserSettings;
-  players?: Player[]; 
+  players?: Player[];
   presetFines?: PresetFine[];
   roles?: RoleDefinition[];
   globalRules?: string;
@@ -38,23 +38,23 @@ interface SettingsModalProps {
 const EMOJI_GRID = ['⚽', '🍺', '🍻', '🥃', '⏰', '🏃', '🚀', '🤡', '👔', '📵', '🦵', '📉', '👻', '💰', '🚿', '🏆', '🟥', '🟨'];
 const COLORS = Object.keys(ROLE_COLOR_MAP);
 const MONTHS = [
-    'Januar', 'Februar', 'Mars', 'April', 'Mai', 'Juni', 
+    'Januar', 'Februar', 'Mars', 'April', 'Mai', 'Juni',
     'Juli', 'August', 'September', 'Oktober', 'November', 'Desember'
 ];
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ 
-  currentUser, 
-  settings, 
+export const SettingsModal: React.FC<SettingsModalProps> = ({
+  currentUser,
+  settings,
   players = [],
   presetFines = [],
   roles = [],
   globalRules = '',
   onSaveGlobalRules,
-  onSave, 
+  onSave,
   onUpdatePassword,
   onPushToCloud,
   isSyncing,
-  onCancel, 
+  onCancel,
   onAddPlayer,
   onHidePlayer,
   onToggleAdmin,
@@ -144,7 +144,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       let csvContent = "\uFEFF"; // UTF-8 BOM for Excel
       csvContent += "DETALJERT BOTLISTE FOR " + MONTHS[exportMonth].toUpperCase() + " " + exportYear + "\n";
       csvContent += "Dato;Spiller;Kategori;Beløp;Status;Beskrivelse\n";
-      
+
       filteredFines.forEach(f => {
           const player = exportData.players.find(p => p.id === f.playerId)?.name || 'Ukjent';
           const date = new Date(f.date).toLocaleDateString('no-NO');
@@ -160,7 +160,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       csvContent += "Spiller;Utestående (skal betales);Betalt;Totalt påløpt\n";
 
       const playerStats: Record<string, { name: string, unpaid: number, paid: number }> = {};
-      
+
       filteredFines.forEach(f => {
           if (!playerStats[f.playerId]) {
               const playerName = exportData.players.find(p => p.id === f.playerId)?.name || 'Ukjent';
@@ -174,7 +174,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       });
 
       // Sorter spillere alfabetisk i oppsummeringen
-      const sortedPlayerIds = Object.keys(playerStats).sort((a, b) => 
+      const sortedPlayerIds = Object.keys(playerStats).sort((a, b) =>
           playerStats[a].name.localeCompare(playerStats[b].name)
       );
 
@@ -215,7 +215,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         <div className="pt-2 border-t border-slate-50 space-y-4">
             {!isChangingPassword ? (
-                <button 
+                <button
                     onClick={() => setIsChangingPassword(true)}
                     className="w-full flex items-center justify-center gap-2 py-3 text-sm font-bold text-blue-600 hover:bg-blue-50 rounded-xl transition-colors border border-dashed border-blue-200"
                 >
@@ -236,12 +236,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Nytt passord</label>
                             <div className="relative">
                                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-4 w-4 text-slate-300" /></div>
-                                <input 
-                                    type="password" 
-                                    value={newPassword} 
-                                    onChange={(e) => {setNewPassword(e.target.value); setPasswordError('');}} 
-                                    placeholder="••••" 
-                                    className="w-full pl-9 p-2.5 text-sm border border-slate-200 rounded-xl bg-white shadow-sm tracking-widest" 
+                                <input
+                                    type="password"
+                                    value={newPassword}
+                                    onChange={(e) => {setNewPassword(e.target.value); setPasswordError('');}}
+                                    placeholder="••••"
+                                    className="w-full pl-9 p-2.5 text-sm border border-slate-200 rounded-xl bg-white shadow-sm tracking-widest"
                                 />
                             </div>
                         </div>
@@ -249,12 +249,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Bekreft passord</label>
                             <div className="relative">
                                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><CheckCircle2 className="h-4 w-4 text-slate-300" /></div>
-                                <input 
-                                    type="password" 
-                                    value={confirmPassword} 
-                                    onChange={(e) => {setConfirmPassword(e.target.value); setPasswordError('');}} 
-                                    placeholder="••••" 
-                                    className="w-full pl-9 p-2.5 text-sm border border-slate-200 rounded-xl bg-white shadow-sm tracking-widest" 
+                                <input
+                                    type="password"
+                                    value={confirmPassword}
+                                    onChange={(e) => {setConfirmPassword(e.target.value); setPasswordError('');}}
+                                    placeholder="••••"
+                                    className="w-full pl-9 p-2.5 text-sm border border-slate-200 rounded-xl bg-white shadow-sm tracking-widest"
                                 />
                             </div>
                         </div>
@@ -278,23 +278,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-widest flex items-center mb-1">
                 <BookOpen size={12} className="mr-1" /> Lagets Regler & Satser
             </h4>
-            
+
             {isEditingRules && isSuperAdmin ? (
                 <div className="space-y-3 animate-in fade-in duration-300">
-                    <textarea 
+                    <textarea
                         value={rulesText}
                         onChange={(e) => setRulesText(e.target.value)}
                         placeholder="Skriv ned reglene, formålet og satsene her..."
                         className="w-full h-40 p-4 text-sm border border-slate-200 rounded-2xl bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none resize-none leading-relaxed"
                     />
                     <div className="flex gap-2">
-                        <button 
+                        <button
                             onClick={() => { setIsEditingRules(false); setRulesText(globalRules || ''); }}
                             className="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase hover:bg-slate-200 transition-colors"
                         >
                             AVBRYT
                         </button>
-                        <button 
+                        <button
                             onClick={handleSaveRules}
                             className="flex-[2] flex items-center justify-center gap-2 py-2.5 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase hover:bg-blue-700 transition-colors shadow-md"
                         >
@@ -309,7 +309,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         {globalRules || "Ingen regler er lagt inn ennå. Kontakt Botsjefen."}
                     </div>
                     {isSuperAdmin && (
-                        <button 
+                        <button
                             onClick={() => setIsEditingRules(true)}
                             className="w-full flex items-center justify-center gap-2 py-3 bg-blue-50 text-blue-600 rounded-xl text-[10px] font-black uppercase hover:bg-blue-100 transition-colors border border-dashed border-blue-200"
                         >
@@ -326,7 +326,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-widest flex items-center mb-3">
                     <UploadCloud size={12} className="mr-1" /> Sky-kontroll
                 </h4>
-                <button 
+                <button
                     onClick={() => runSave(onPushToCloud)}
                     disabled={isSyncing}
                     className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50"
@@ -347,14 +347,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="space-y-3">
                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Legg til spiller</h4>
                 <div className="flex gap-2">
-                    <input 
-                        type="text" 
-                        value={newPlayerName} 
-                        onChange={(e) => setNewPlayerName(e.target.value)} 
-                        placeholder="Fullt navn..." 
-                        className="flex-1 p-2.5 text-sm border border-slate-300 rounded-xl bg-white shadow-sm" 
+                    <input
+                        type="text"
+                        value={newPlayerName}
+                        onChange={(e) => setNewPlayerName(e.target.value)}
+                        placeholder="Fullt navn..."
+                        className="flex-1 p-2.5 text-sm border border-slate-300 rounded-xl bg-white shadow-sm"
                     />
-                    <button 
+                    <button
                         onClick={() => { if(newPlayerName.trim() && onAddPlayer) void runSave(() => onAddPlayer(newPlayerName.trim(), 'Spiller'), () => setNewPlayerName('')); }}
                         className="bg-blue-600 text-white p-2.5 rounded-xl hover:bg-blue-700 shadow-sm shrink-0"
                     >
@@ -380,7 +380,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </div>
                             <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0 ml-2">
                                 {isSuperAdmin && !isBirk && (
-                                    <button 
+                                    <button
                                         onClick={() => { if (onToggleAdmin) void runSave(() => onToggleAdmin(p.id)); }}
                                         className={`p-2 rounded-lg transition-colors ${p.systemRole === 'admin' ? 'text-amber-500 hover:bg-amber-50' : 'text-slate-300 hover:bg-slate-50'}`}
                                         title="Veksle Botsjef-rettigheter"
@@ -389,7 +389,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                     </button>
                                 )}
                                 {(!isBirk || (isSuperAdmin && isBirk)) && (
-                                    <button 
+                                    <button
                                         onClick={() => { if(onHidePlayer && confirm(`Skjule ${p.name} i appen? Brukerkontoen og all historikk blir beholdt.`)) void runSave(() => onHidePlayer(p.id)); }}
                                         className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
                                         title={`Skjul ${p.name}`}
@@ -505,8 +505,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="space-y-4">
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Velg år</label>
-                        <select 
-                            value={exportYear} 
+                        <select
+                            value={exportYear}
                             onChange={(e) => setExportYear(Number(e.target.value))}
                             className="w-full p-3 text-sm border border-slate-200 rounded-2xl bg-white shadow-sm outline-none focus:ring-2 focus:ring-blue-500"
                         >
@@ -518,12 +518,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Velg måned</label>
                         <div className="grid grid-cols-3 gap-2">
                             {MONTHS.map((m, idx) => (
-                                <button 
-                                    key={m} 
+                                <button
+                                    key={m}
                                     onClick={() => setExportMonth(idx)}
                                     className={`py-2.5 rounded-xl text-[10px] font-black uppercase transition-all ${
-                                        exportMonth === idx 
-                                        ? 'bg-blue-600 text-white shadow-md' 
+                                        exportMonth === idx
+                                        ? 'bg-blue-600 text-white shadow-md'
                                         : 'bg-white border border-slate-100 text-slate-500 hover:bg-slate-50'
                                     }`}
                                 >
@@ -567,13 +567,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="px-4 py-4 bg-white border-b border-slate-50 shrink-0 shadow-sm relative z-10">
                 <div className="grid grid-cols-5 gap-1 p-1 bg-slate-50 rounded-full">
                     {(['profile', 'players', 'fines', 'roles', 'export'] as const).map(tab => (
-                        <button 
+                        <button
                             key={tab}
                             disabled={isSaving}
                             onClick={() => setActiveTab(tab)}
                             className={`py-2 rounded-full text-[10px] font-black uppercase transition-all duration-300 flex items-center justify-center ${
-                                activeTab === tab 
-                                ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' 
+                                activeTab === tab
+                                ? 'bg-blue-600 text-white shadow-lg shadow-blue-200'
                                 : 'text-slate-400 hover:text-slate-600'
                             }`}
                         >

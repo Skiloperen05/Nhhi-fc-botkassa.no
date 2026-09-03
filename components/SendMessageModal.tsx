@@ -35,7 +35,7 @@ export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCa
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div 
+      <div
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
         onClick={() => { if (!isSaving) onCancel(); }}
       ></div>
@@ -54,7 +54,7 @@ export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCa
         <SaveStatus isSaving={isSaving} saveError={saveError} />
         <form onSubmit={handleSubmit}>
           <fieldset disabled={isSaving} className="p-6 space-y-4">
-            
+
             {/* Target Selection */}
             <div className="space-y-2">
                 <label className="block text-xs font-bold text-slate-500 uppercase">Mottaker</label>
@@ -63,8 +63,8 @@ export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCa
                         type="button"
                         onClick={() => setTarget('all')}
                         className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                            target === 'all' 
-                            ? 'bg-blue-50 border-blue-500 text-blue-700' 
+                            target === 'all'
+                            ? 'bg-blue-50 border-blue-500 text-blue-700'
                             : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                         }`}
                     >
@@ -75,8 +75,8 @@ export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCa
                         type="button"
                         onClick={() => setTarget('single')}
                         className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                            target === 'single' 
-                            ? 'bg-blue-50 border-blue-500 text-blue-700' 
+                            target === 'single'
+                            ? 'bg-blue-50 border-blue-500 text-blue-700'
                             : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                         }`}
                     >
@@ -87,7 +87,7 @@ export const SendMessageModal: React.FC<SendMessageModalProps> = ({ onSend, onCa
 
             {target === 'single' && (
                 <div className="animate-in fade-in slide-in-from-top-2">
-                    <PlayerSelect 
+                    <PlayerSelect
                         placeholder="Velg mottaker..."
                         selectedPlayerId={recipientId}
                         onSelect={setRecipientId}

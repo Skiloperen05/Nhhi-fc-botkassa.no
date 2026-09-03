@@ -42,7 +42,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onSave
 
       {/* Modal */}
       <div className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-300 p-8 text-center border border-white/20">
-        
+
         <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg rotate-3">
           <KeyRound size={30} />
         </div>
@@ -61,7 +61,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onSave
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <Lock className="h-4 w-4 text-slate-400" />
                     </div>
-                    <input 
+                    <input
                         type="password"
                         value={newPassword}
                         onChange={(e) => { setNewPassword(e.target.value); setError(''); }}
@@ -78,7 +78,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onSave
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <CheckCircle2 className="h-4 w-4 text-slate-400" />
                     </div>
-                    <input 
+                    <input
                         type="password"
                         value={confirmPassword}
                         onChange={(e) => { setConfirmPassword(e.target.value); setError(''); }}
