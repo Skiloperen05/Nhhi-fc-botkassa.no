@@ -675,7 +675,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
         </div>
 
         {/* Profesjonell PC Arbeidstabell */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-x-auto">
           <table className="w-full text-left text-sm border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold text-xs uppercase tracking-wider select-none">
@@ -712,7 +712,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
                 >
                   Beløp <SortIcon field="amount" />
                 </th>
-                <th className="px-5 py-3.5 text-right w-28">
+                <th className="px-5 py-3.5 text-right w-40">
                   Handling
                 </th>
               </tr>
@@ -790,7 +790,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
                       {/* Merknad / Kommentar */}
                       <td className="px-5 py-4 max-w-xs">
                         {fine.description ? (
-                          <div className="text-xs text-slate-600 truncate" title={fine.description}>
+                          <div className="text-xs text-slate-600 line-clamp-2 break-words" title={fine.description}>
                             "{fine.description}"
                           </div>
                         ) : (
@@ -837,7 +837,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
 
                       {/* Handling */}
                       <td className="px-5 py-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
                           {isAdmin && !isPaid && !isWaived && onAdminPay && (
                             <button
                               type="button"
