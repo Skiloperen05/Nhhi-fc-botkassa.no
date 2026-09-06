@@ -78,6 +78,7 @@ export interface FineEntry {
   reason: string; 
   description?: string; 
   aiComment?: string;
+  registeredBy?: Pick<User, 'id' | 'name'>;
   date: string;
   timestamp: number;
   status: FineStatus; 

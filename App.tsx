@@ -719,6 +719,7 @@ const App: React.FC = () => {
         ) : (
             view === 'add' ? (
               <AddFineView
+                currentUser={user}
                 onAddFine={saveFine}
                 onAddFines={saveBulkFines}
                 players={activePlayers}
@@ -728,7 +729,7 @@ const App: React.FC = () => {
                 onTriggerToast={triggerToast}
               />
             ) :
-            view === 'overview' ? <StatsView fines={historyFines} players={players} onSelectPlayer={(id) => { setSelectedPlayerId(id); setView('player'); }} currentFilter={filter} onFilterChange={setFilter} currentUserRole={user.role} /> :
+            view === 'overview' ? <StatsView fines={historyFines} players={players} onSelectPlayer={(id) => { setSelectedPlayerId(id); setView('player'); }} currentFilter={filter} onFilterChange={setFilter} monthOffset={listMonthOffset} onMonthOffsetChange={setListMonthOffset} currentUserRole={user.role} /> :
             view === 'list' ? (
               <FineListView
                 fines={historyFines}

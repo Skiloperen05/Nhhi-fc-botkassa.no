@@ -1,13 +1,11 @@
 import { createPortal } from 'react-dom';
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Player, PresetFine, FineEntry } from '../types';
-import { generateFineComment } from '../services/commentService';
+import React, { useState, useMemo, useRef } from 'react';
+import { Player, PresetFine, FineEntry, User } from '../types';
 import {
   Search,
   X,
   Calendar,
   ChevronRight,
-  Dices,
   Check,
   Plus,
   Layers,
@@ -18,6 +16,7 @@ import {
 } from 'lucide-react';
 
 interface AddFineViewProps {
+  currentUser: User;
   onAddFine: (fine: FineEntry) => Promise<boolean>;
   onAddFines?: (fines: FineEntry[]) => Promise<boolean>;
   players: Player[];
@@ -62,6 +61,7 @@ const getYesterdayIso = () => {
 };
 
 export const AddFineView: React.FC<AddFineViewProps> = ({
+  currentUser,
   onAddFine,
   onAddFines,
   players,
@@ -111,9 +111,13 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
   const [dateType, setDateType] = useState<'idag' | 'igar' | 'custom'>('idag');
   const [customDate, setCustomDate] = useState<string>('');
 
-  // Comment state
+  // The amount override and optional comment belong to this registration only.
   const [note, setNote] = useState<string>('');
-  const [isCommentDirty, setIsCommentDirty] = useState<boolean>(false);
+  const [fineAmount, setFineAmount] = useState('');
+  const amount = Number(fineAmount);
+  const isAmountValid = fineAmount.trim() !== '' && Number.isFinite(amount) && amount > 0 &&
+    Number.isSafeInteger(Math.round(amount * 100)) &&
+    Math.abs(amount * 100 - Math.round(amount * 100)) < 0.000001;
 
   // Modals / Sheets
   const [isConfirmSheetOpen, setIsConfirmSheetOpen] = useState(false);
@@ -167,37 +171,6 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
     return 'i dag';
   }, [dateType, customDate]);
 
-  // Auto-generate comment whenever fine or syndere change (unless user manually typed something)
-  useEffect(() => {
-    if (!isCommentDirty) {
-      if (selectedFine && selectedPlayerIds.length > 0) {
-        const names = selectedPlayers.map(p => p.name.split(' ')[0]);
-        const who = names.length === 1
-          ? names[0]
-          : names.length <= 3
-            ? names.slice(0, -1).join(', ') + ' og ' + names[names.length - 1]
-            : `${names.length} syndere`;
-        const generated = generateFineComment(who, selectedFine.label, '', selectedFine.amount);
-        setNote(generated);
-      } else {
-        setNote('');
-      }
-    }
-  }, [selectedFine, selectedPlayerIds, isCommentDirty, selectedPlayers]);
-
-  const handleRollDice = () => {
-    if (!selectedFine || selectedPlayerIds.length === 0) return;
-    const names = selectedPlayers.map(p => p.name.split(' ')[0]);
-    const who = names.length === 1
-      ? names[0]
-      : names.length <= 3
-        ? names.slice(0, -1).join(', ') + ' og ' + names[names.length - 1]
-        : `${names.length} syndere`;
-    const generated = generateFineComment(who, selectedFine.label, '', selectedFine.amount);
-    setNote(generated);
-    setIsCommentDirty(false);
-  };
-
   const togglePlayer = (id: string) => {
     setSelectedPlayerIds(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
@@ -214,21 +187,23 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
   };
 
   // Selection readiness
-  const isReady = !!selectedFine && selectedPlayerIds.length > 0;
-  const totalSum = (selectedFine?.amount || 0) * selectedPlayerIds.length;
+  const isReady = !!selectedFine && selectedPlayerIds.length > 0 && isAmountValid;
+  const totalSum = isAmountValid ? Math.round(amount * 100) * selectedPlayerIds.length / 100 : 0;
 
   const handleFinePick = (preset: PresetFine) => {
     if (selectedFine?.id === preset.id) {
       setSelectedFine(null);
     } else {
       setSelectedFine(preset);
+      setFineAmount(String(preset.amount));
     }
   };
 
   const handleCustomFineSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customName.trim()) return;
-    const amt = parseInt(customAmount, 10) || 50;
+    const amt = Number(customAmount);
+    if (!Number.isFinite(amt) || amt <= 0 || Math.abs(amt * 100 - Math.round(amt * 100)) > 0.000001) return;
     const customPreset: PresetFine = {
       id: `custom_${Date.now()}`,
       label: customName.trim(),
@@ -236,12 +211,13 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
       icon: customEmoji || '⚠️',
     };
     setSelectedFine(customPreset);
+    setFineAmount(String(amt));
     setIsAllFinesModalOpen(false);
     setIsCustomMode(false);
   };
 
   const handleConfirmFines = async () => {
-    if (!selectedFine || selectedPlayerIds.length === 0 || submittingRef.current) return;
+    if (!selectedFine || !isReady || submittingRef.current) return;
     submittingRef.current = true;
     setIsSubmitting(true);
     setSaveError('');
@@ -253,10 +229,10 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
       const newFines: FineEntry[] = selectedPlayerIds.map(playerId => ({
         id: draftIds.current.get(playerId) || (() => { const id = crypto.randomUUID(); draftIds.current.set(playerId, id); return id; })(),
         playerId,
-        amount: selectedFine.amount,
+        amount,
+        registeredBy: { id: currentUser.id, name: currentUser.name },
         reason: selectedFine.label,
         description: note.trim() || undefined,
-        aiComment: note.trim() || undefined,
         date: fineIso,
         timestamp: fineTimestamp,
         status: 'unpaid',
@@ -277,7 +253,7 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
       setSelectedFine(null);
       setSelectedPlayerIds([]);
       setNote('');
-      setIsCommentDirty(false);
+      setFineAmount('');
       setIsConfirmSheetOpen(false);
     } catch (err) {
       setSaveError('Bøtene ble ikke lagret. Prøv igjen.');
@@ -289,6 +265,21 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
 
   // Check if active fine is outside monitor (not in topSixPresets)
   const isSelectedFineOffMonitor = selectedFine && !topSixPresets.some(p => p.id === selectedFine.id);
+
+  const amountField = (
+    <label className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-600">
+      <span>Beløp per spiller (kr)</span>
+      <input
+        type="number" inputMode="decimal" min="0.01" step="0.01"
+        aria-label="Beløp per spiller (kr)"
+        value={fineAmount}
+        onChange={event => setFineAmount(event.target.value)}
+        aria-invalid={!isAmountValid}
+        className="w-28 border border-slate-300 rounded-lg px-2 py-1 text-slate-900 bg-white outline-none focus:border-blue-500"
+      />
+      {!isAmountValid && <span className="w-full text-red-600 font-medium">Skriv et beløp over 0 kr med maks to desimaler.</span>}
+    </label>
+  );
 
   return (
     <div className="relative w-full h-full flex-1 min-h-0 flex flex-col">
@@ -311,7 +302,7 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
 
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold text-blue-600">
-                {selectedFine ? `${selectedFine.amount} kr per synder` : 'Velg bot'}
+                {selectedFine ? `${amount} kr per synder` : 'Velg bot'}
               </span>
               <button
                 type="button"
@@ -364,13 +355,15 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
             })}
           </div>
 
+          {selectedFine && <div className="mt-2">{amountField}</div>}
+
           {/* If user selected a fine from "Flere bøter" (off monitor) */}
           {isSelectedFineOffMonitor && selectedFine && (
             <div className="mt-1.5 px-2.5 py-1 bg-blue-50 border border-blue-300 rounded-xl flex items-center justify-between">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="text-sm flex-none">{selectedFine.icon}</span>
                 <span className="text-[10px] font-bold text-blue-950 truncate">{selectedFine.label}</span>
-                <span className="text-[9px] font-semibold text-blue-600 flex-none">({selectedFine.amount} kr)</span>
+                <span className="text-[9px] font-semibold text-blue-600 flex-none">({amount} kr)</span>
               </div>
               <button
                 type="button"
@@ -557,29 +550,17 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
             </div>
           </div>
 
-          {/* Slim Comment input with Dice */}
+          {/* Comment input */}
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1">
             <MessageSquare size={12} className="text-blue-600 flex-none" />
             <input
               type="text"
               value={note}
-              onChange={e => {
-                setNote(e.target.value);
-                setIsCommentDirty(true);
-              }}
-              placeholder="Botsjef-kommentar..."
+              aria-label="Kommentar (valgfritt)"
+              onChange={e => setNote(e.target.value)}
+              placeholder="Kommentar (valgfritt)..."
               className="flex-1 min-w-0 bg-transparent border-none outline-none text-[10px] font-medium text-slate-900 placeholder:text-slate-400"
             />
-            {selectedFine && selectedPlayerIds.length > 0 && (
-              <button
-                type="button"
-                onClick={handleRollDice}
-                className="p-1 rounded bg-white text-blue-600 hover:bg-blue-50 border border-slate-200 shadow-2xs active:rotate-12 transition-transform"
-                title="Generer ny botsjef-kommentar"
-              >
-                <Dices size={12} />
-              </button>
-            )}
           </div>
         </div>
 
@@ -685,6 +666,8 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
               })}
             </div>
 
+            {selectedFine && <div className="mt-4 p-3 bg-slate-50 rounded-xl">{amountField}</div>}
+
             {/* If off-monitor fine is selected */}
             {isSelectedFineOffMonitor && selectedFine && (
               <div className="mt-4 p-4 bg-blue-50 border-2 border-blue-500 rounded-2xl flex items-center justify-between shadow-sm animate-in fade-in">
@@ -695,7 +678,7 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
                       {selectedFine.label}
                     </div>
                     <div className="text-xs font-semibold text-blue-600 mt-0.5">
-                      {selectedFine.amount} kr per synder · Valgt fra bibliotek
+                      {amount} kr per synder · Valgt fra bibliotek
                     </div>
                   </div>
                 </div>
@@ -771,29 +754,17 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-500">
-                  Botsjef-kommentar (automatisk generert eller egen tekst)
+                  Kommentar (valgfritt)
                 </label>
-                {selectedFine && selectedPlayerIds.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleRollDice}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors"
-                  >
-                    <Dices size={14} />
-                    <span>Rull ny kommentar</span>
-                  </button>
-                )}
               </div>
               <div className="flex items-start gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3">
                 <MessageSquare size={18} className="text-blue-600 flex-none mt-0.5" />
                 <textarea
                   rows={2}
                   value={note}
-                  onChange={e => {
-                    setNote(e.target.value);
-                    setIsCommentDirty(true);
-                  }}
-                  placeholder="Skriv en forklaring eller la botsjefens autokommentar stå..."
+                  aria-label="Kommentar (valgfritt)"
+                  onChange={e => setNote(e.target.value)}
+                  placeholder="Skriv din egen kommentar (valgfritt)..."
                   className="flex-1 min-w-0 bg-transparent border-none outline-none text-sm font-medium text-slate-900 placeholder:text-slate-400 resize-none"
                 />
               </div>
@@ -943,7 +914,7 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500 font-medium">Beløp per synder:</span>
                 <span className="font-bold text-slate-900">
-                  {selectedFine ? `${selectedFine.amount} kr` : '0 kr'}
+                  {selectedFine ? `${amount} kr` : '0 kr'}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
@@ -1004,7 +975,7 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
                   </span>
                 </div>
                 <div className="text-xs font-semibold text-slate-500 mt-0.5">
-                  {selectedFine.amount} kr × {selectedPlayerIds.length} {selectedPlayerIds.length === 1 ? 'synder' : 'syndere'} · {dateLabel}
+                  {amount} kr × {selectedPlayerIds.length} {selectedPlayerIds.length === 1 ? 'synder' : 'syndere'} · {dateLabel}
                 </div>
               </div>
 
@@ -1056,7 +1027,7 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
               </button>
               <button
                 type="button"
-                disabled={isSubmitting}
+                disabled={isSubmitting || !isReady}
                 onClick={handleConfirmFines}
                 className="flex-1 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-sm rounded-xl shadow-lg shadow-blue-600/25 flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
               >
@@ -1151,6 +1122,7 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
                           type="button"
                           onClick={() => {
                             setSelectedFine(preset);
+                            setFineAmount(String(preset.amount));
                             setIsAllFinesModalOpen(false);
                           }}
                           className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
@@ -1213,7 +1185,8 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
                     <input
                       type="number"
                       required
-                      min="1"
+                      min="0.01"
+                      step="0.01"
                       value={customAmount}
                       onChange={e => setCustomAmount(e.target.value)}
                       className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl outline-none focus:border-blue-500 text-slate-900 font-bold"

@@ -1,4 +1,5 @@
-import { isDateInPeriod } from '../services/dateService';
+import { MonthNavigator } from './MonthNavigator';
+import { isDateInPeriod, monthAtOffset } from '../services/dateService';
 
 import React, { useMemo, useState } from 'react';
 import { FineEntry, TimeFilter, Player, Role } from '../types';
@@ -9,6 +10,8 @@ interface StatsViewProps {
   fines: FineEntry[];
   players: Player[];
   onSelectPlayer: (playerId: string) => void;
+  monthOffset: number;
+  onMonthOffsetChange: (offset: number) => void;
   currentFilter: TimeFilter;
   onFilterChange: (filter: TimeFilter) => void;
   currentUserRole?: Role;
@@ -50,19 +53,17 @@ const limitPieData = (data: { name: string; fullName: string; value: number }[],
     return main;
 };
 
-export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPlayer, currentFilter, onFilterChange, currentUserRole }) => {
+export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPlayer, currentFilter, onFilterChange, monthOffset, onMonthOffsetChange, currentUserRole }) => {
   const [distMode, setDistMode] = useState<'type' | 'player' | 'status'>('type');
   const [trendMode, setTrendMode] = useState<'amount' | 'count'>('amount');
   const [showAllDebts, setShowAllDebts] = useState(false);
   const [showAllSinners, setShowAllSinners] = useState(false);
 
+  const activeDate = useMemo(() => monthAtOffset(monthOffset), [monthOffset]);
+  const periodReference = currentFilter === 'month' ? activeDate : new Date();
+
   // --- Filtering Logic for KPIs (Standard) ---
-  const filteredFines = useMemo(() => fines.filter(fine => isDateInPeriod(fine.date, currentFilter)), [fines, currentFilter]);
-
-  // --- Filtering Logic for TREND CHART (Minimum Semester) ---
-  const chartFilter = currentFilter === 'month' ? 'semester' : currentFilter;
-
-  const chartFines = useMemo(() => fines.filter(fine => isDateInPeriod(fine.date, chartFilter)), [fines, chartFilter]);
+  const filteredFines = useMemo(() => fines.filter(fine => isDateInPeriod(fine.date, currentFilter, periodReference)), [fines, currentFilter, activeDate]);
 
   // --- Derived Stats ---
   const totalCollected = filteredFines.reduce((sum, fine) => sum + fine.amount, 0);
@@ -90,7 +91,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
   // --- Outstanding Debts Calculation (Admin Only) ---
   const debtList = useMemo(() => {
       const debts: Record<string, number> = {};
-      fines.filter(f => f.status === 'unpaid').forEach(f => {
+      filteredFines.filter(f => f.status === 'unpaid').forEach(f => {
           debts[f.playerId] = (debts[f.playerId] || 0) + f.amount;
       });
 
@@ -102,7 +103,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
           }))
           .filter(p => p.amount > 0)
           .sort((a, b) => b.amount - a.amount);
-  }, [fines, players]);
+  }, [filteredFines, players]);
 
 
   // Handler for Y-Axis name click
@@ -152,13 +153,15 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
   // --- Data for Line Chart (Trend) ---
   const trendData = useMemo(() => {
     const grouped: Record<string, { amount: number, count: number }> = {};
-    const sorted = [...chartFines].sort((a, b) => a.timestamp - b.timestamp);
+    const sorted = [...filteredFines].sort((a, b) => a.timestamp - b.timestamp);
 
     sorted.forEach(fine => {
         const date = new Date(fine.date);
         let key = '';
 
-        if (chartFilter === 'all') {
+        if (currentFilter === 'month') {
+            key = date.toLocaleDateString('no-NO', { day: 'numeric', month: 'short' });
+        } else if (currentFilter === 'all') {
             key = date.toLocaleDateString('no-NO', { month: 'short', year: '2-digit' });
         } else {
             key = date.toLocaleDateString('no-NO', { month: 'short' });
@@ -174,7 +177,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
         amount: grouped[key].amount,
         count: grouped[key].count
     }));
-  }, [chartFines, chartFilter]);
+  }, [filteredFines, currentFilter]);
 
 
   const COLORS = ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'];
@@ -204,10 +207,12 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
             >
               {filter === 'all' ? 'Totalt' :
                filter === 'year' ? 'I år' :
-               filter === 'semester' ? 'Sem.' : 'Denne mnd'}
+               filter === 'semester' ? 'Sem.' : 'Måned'}
             </button>
           ))}
         </div>
+
+        {currentFilter === 'month' && <MonthNavigator offset={monthOffset} onChange={onMonthOffsetChange} />}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 gap-3">
@@ -493,8 +498,8 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
       {/* ========================================================================= */}
       <div className="hidden md:block space-y-6">
         {/* Desktop Toolbar: Periodeknapper og Info */}
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-2xs flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="text-xs font-black uppercase tracking-wider text-slate-400">Periode:</span>
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
               {(['all', 'year', 'semester', 'month'] as TimeFilter[]).map((filter) => (
@@ -509,13 +514,15 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
                 >
                   {filter === 'all' ? 'Totalt' :
                    filter === 'year' ? 'I år' :
-                   filter === 'semester' ? 'Semester' : 'Denne måned'}
+                   filter === 'semester' ? 'Semester' : 'Måned'}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="text-xs text-slate-500 font-semibold flex items-center gap-4">
+          {currentFilter === 'month' && <MonthNavigator offset={monthOffset} onChange={onMonthOffsetChange} />}
+
+          <div className="text-xs text-slate-500 font-semibold flex flex-wrap items-center gap-4">
             <span>Viser statistikk for <strong className="text-slate-900">{filteredFines.length}</strong> bøter</span>
             <span>Aktiv spillerstall: <strong className="text-slate-900">{players.filter(p => p.isActive !== false).length}</strong></span>
           </div>
@@ -717,7 +724,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ fines, players, onSelectPl
                     <Activity className="w-5 h-5 mr-2 text-blue-600"/>
                     Utvikling over tid
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Viser månedlig aktivitet i valgt periode</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{currentFilter === 'month' ? 'Viser daglig aktivitet i valgt måned' : 'Viser månedlig aktivitet i valgt periode'}</p>
                 </div>
                 <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
                   <button

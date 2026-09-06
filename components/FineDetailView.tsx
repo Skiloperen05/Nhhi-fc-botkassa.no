@@ -257,6 +257,10 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                 )}
             </div>
 
+            <p className="text-xs text-slate-500 mb-4">
+                Registrert av: {fine.registeredBy?.name || 'Ikke registrert på denne eldre boten'}
+            </p>
+
             {/* Admin Actions (Pay / Waive / Reopen) */}
             {isAdmin && isUnpaid && (
                 <div className="mb-4 flex items-center justify-center gap-2 flex-wrap">

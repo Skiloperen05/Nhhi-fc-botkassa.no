@@ -1,3 +1,4 @@
+import { MonthNavigator } from './MonthNavigator';
 import { isDateInPeriod, monthAtOffset } from '../services/dateService';
 import { useSaveAction } from '../hooks/useSaveAction';
 import { SaveStatus } from './SaveStatus';
@@ -5,7 +6,7 @@ import { SaveStatus } from './SaveStatus';
 import React, { useState, useMemo, useEffect } from 'react';
 import { FineEntry, TimeFilter, Player, Role } from '../types';
 import {
-  ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
+  ArrowUpDown, ArrowUp, ArrowDown,
   TrendingUp, Trophy, PieChart, Search, Filter, CheckCircle2,
   Clock, AlertTriangle, Download, MessageSquare, Shield, CheckCheck, X,
   FileX2, RotateCcw
@@ -167,7 +168,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
 
   // CSV Export for PC
   const handleExportCSV = () => {
-    const headers = ['Dato', 'Spiller', 'Bot', 'Beskrivelse', 'Beløp', 'Status', 'Tapsført Årsak'];
+    const headers = ['Dato', 'Spiller', 'Bot', 'Beskrivelse', 'Beløp', 'Status', 'Tapsført Årsak', 'Registrert av'];
     const rows = sortedFines.map(f => {
       const p = players.find(player => player.id === f.playerId);
       const statusText = f.status === 'paid' ? 'Betalt' : f.status === 'waived' ? 'Tapsført' : 'Ubetalt';
@@ -178,7 +179,8 @@ export const FineListView: React.FC<FineListViewProps> = ({
         `"${(f.description || '').replace(/"/g, '""')}"`,
         f.amount,
         statusText,
-        `"${(f.waivedReason || '').replace(/"/g, '""')}"`
+        `"${(f.waivedReason || '').replace(/"/g, '""')}"`,
+        `"${(f.registeredBy?.name || '').replace(/"/g, '""')}"`
       ].join(';');
     });
 
@@ -205,7 +207,6 @@ export const FineListView: React.FC<FineListViewProps> = ({
               key={f}
               onClick={() => {
                 setFilter(f); onFilterChange?.(f);
-                if (f !== 'month') setMonthOffset(0);
               }}
               className={`flex-1 px-3 py-1.5 text-xs font-bold uppercase tracking-wide rounded-xl whitespace-nowrap transition-all ${
                 filter === f
@@ -220,26 +221,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
           ))}
         </div>
 
-        {/* Måned-navigasjon */}
-        {filter === 'month' && (
-          <div className="flex items-center justify-between px-2 bg-white border border-slate-200/80 rounded-2xl py-2 shadow-2xs">
-            <button
-              aria-label="Forrige måned" onClick={() => setMonthOffset(prev => prev - 1)}
-              className="p-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 active:scale-95 transition-all"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <div className="text-xs font-black text-slate-900 uppercase tracking-wider">
-              {activeMonthName}
-            </div>
-            <button
-              aria-label="Neste måned" onClick={() => setMonthOffset(prev => prev + 1)}
-              className="p-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 active:scale-95 transition-all"
-            >
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        )}
+        {filter === 'month' && <MonthNavigator offset={monthOffset} onChange={setMonthOffset} />}
 
         {/* Hurtigsøk på mobil */}
         <div className="relative">
@@ -395,6 +377,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
                           "{fine.description}"
                         </div>
                       )}
+                      {fine.registeredBy && <div className="text-[10px] text-slate-500 mt-1">Registrert av {fine.registeredBy.name}</div>}
                       {isWaived && fine.waivedReason && (
                         <div className="text-[10px] text-purple-600 font-semibold mt-1 flex items-center gap-1">
                           <FileX2 size={11} /> Tapsført: "{fine.waivedReason}"
@@ -541,7 +524,6 @@ export const FineListView: React.FC<FineListViewProps> = ({
                   key={f}
                   onClick={() => {
                     setFilter(f); onFilterChange?.(f);
-                    if (f !== 'month') setMonthOffset(0);
                   }}
                   className={`px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
                     filter === f
@@ -556,28 +538,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
               ))}
             </div>
 
-            {/* Måned-velger hvis aktiv */}
-            {filter === 'month' && (
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1 rounded-xl">
-                <button
-                  aria-label="Forrige måned" onClick={() => setMonthOffset(prev => prev - 1)}
-                  className="p-1 text-slate-500 hover:text-blue-600 transition-colors"
-                  title="Forrige måned"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <span className="text-xs font-black text-slate-800 uppercase tracking-wider min-w-[120px] text-center">
-                  {activeMonthName}
-                </span>
-                <button
-                  aria-label="Neste måned" onClick={() => setMonthOffset(prev => prev + 1)}
-                  className="p-1 text-slate-500 hover:text-blue-600 transition-colors"
-                  title="Neste måned"
-                >
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            )}
+            {filter === 'month' && <MonthNavigator offset={monthOffset} onChange={setMonthOffset} />}
 
             {/* Søk og Handlinger */}
             <div className="flex items-center gap-3 flex-1 max-w-md justify-end">
@@ -796,6 +757,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
                         ) : (
                           <span className="text-xs text-slate-300 italic">Ingen merknad</span>
                         )}
+                        {fine.registeredBy && <div className="text-[11px] text-slate-500 mt-1">Registrert av {fine.registeredBy.name}</div>}
                         {commentCount > 0 && (
                           <div className="flex items-center gap-1 text-[11px] text-blue-600 font-semibold mt-0.5">
                             <MessageSquare size={12} /> {commentCount} {commentCount === 1 ? 'kommentar' : 'kommentarer'}
