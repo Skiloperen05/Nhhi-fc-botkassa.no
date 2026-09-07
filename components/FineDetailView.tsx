@@ -1,3 +1,5 @@
+import { isFinePaymentOpen, canRequestFinePayment } from '../services/paymentService';
+import { PaymentAvailability } from './PaymentAvailability';
 
 import { useSaveAction } from '../hooks/useSaveAction';
 import { SaveStatus } from './SaveStatus';
@@ -141,6 +143,7 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
   };
 
   const handlePayRequest = () => {
+      if (!canRequestFinePayment(fine)) return;
       // Logic handled via onUpdateFine to trigger App's saveFine
       return runSave(() => onUpdateFine({...fine, payRequest: { status: 'pending', date: new Date().toISOString() }}));
   };
@@ -178,14 +181,14 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
         </div>
 
         {/* Action Buttons for Player (as drawn in Sketch 2) */}
-        {isMine && !isPaid && (
+        {isMine && isUnpaid && (
             <div className="mt-6 flex gap-3 animate-in fade-in slide-in-from-bottom-2">
                 {!hasPendingAction ? (
                     <>
                         <button
-                            disabled={isSaving}
+                            disabled={isSaving || !isFinePaymentOpen(fine)}
                             onClick={handlePayRequest}
-                            className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700 border border-green-500 rounded-2xl text-xs font-black uppercase transition-all shadow-lg active:scale-95"
+                            className="disabled:opacity-40 disabled:cursor-not-allowed flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700 border border-green-500 rounded-2xl text-xs font-black uppercase transition-all shadow-lg active:scale-95"
                         >
                             <DollarSign size={16} />
                             Betalt
@@ -261,12 +264,14 @@ export const FineDetailView: React.FC<FineDetailViewProps> = ({
                 Registrert av: {fine.registeredBy?.name || 'Ikke registrert på denne eldre boten'}
             </p>
 
+            <div className="mb-4"><PaymentAvailability fine={fine} /></div>
+
             {/* Admin Actions (Pay / Waive / Reopen) */}
             {isAdmin && isUnpaid && (
                 <div className="mb-4 flex items-center justify-center gap-2 flex-wrap">
                     <button
-                        disabled={isSaving} onClick={() => runSave(() => onAdminPay(fine.id))}
-                        className="inline-flex items-center px-4 py-2 bg-green-50 text-green-700 rounded-full text-[10px] font-black border border-green-200 hover:bg-green-100 transition-colors uppercase tracking-widest"
+                        disabled={isSaving || !isFinePaymentOpen(fine)} onClick={() => runSave(() => onAdminPay(fine.id))}
+                        className="disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center px-4 py-2 bg-green-50 text-green-700 rounded-full text-[10px] font-black border border-green-200 hover:bg-green-100 transition-colors uppercase tracking-widest"
                     >
                         <DollarSign size={14} className="mr-1.5" />
                         BEKREFT BETALING

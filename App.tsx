@@ -1,3 +1,4 @@
+import { canSavePaymentState, paymentAvailabilityMessage } from './services/paymentService';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ViewState, FineEntry, User, TimeFilter, UserSettings, Player, PresetFine, RoleDefinition, Message } from './types';
@@ -277,6 +278,10 @@ const App: React.FC = () => {
   };
 
   const saveFine = async (fine: FineEntry): Promise<boolean> => runMutation(async () => {
+    if (!canSavePaymentState(fine, historyFines.find(saved => saved.id === fine.id))) {
+      triggerToast(paymentAvailabilityMessage(fine));
+      return false;
+    }
     const type = archivedFines.some(f => f.id === fine.id) || fine.isArchived ? 'archive' : 'fine';
     const updated = type === 'archive' ? { ...fine, isArchived: true } : fine;
     if (!await cloudSave(type, fine.id, updated)) return false;
@@ -285,6 +290,7 @@ const App: React.FC = () => {
   });
 
   const saveBulkFines = async (newFines: FineEntry[]): Promise<boolean> => runMutation(async () => {
+    if (!newFines.every(fine => canSavePaymentState(fine, historyFines.find(saved => saved.id === fine.id)))) return false;
     if (!newFines.every(fine => activePlayers.some(player => player.id === fine.playerId))) return false;
     if (!await cloudSaveBulk('fine', newFines)) return false;
     mergeFineUpdates('fine', newFines);

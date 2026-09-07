@@ -1,3 +1,5 @@
+import { isFinePaymentOpen } from '../services/paymentService';
+import { PaymentAvailability } from './PaymentAvailability';
 import { MonthNavigator } from './MonthNavigator';
 import { isDateInPeriod, monthAtOffset } from '../services/dateService';
 import { useSaveAction } from '../hooks/useSaveAction';
@@ -372,6 +374,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
                       <div className="text-xs font-semibold text-slate-700 mt-1 truncate">
                         {fine.reason || 'Uspesifisert bot'}
                       </div>
+                      <PaymentAvailability fine={fine} />
                       {fine.description && (
                         <div className="text-[11px] text-slate-400 truncate mt-0.5">
                           "{fine.description}"
@@ -425,8 +428,8 @@ export const FineListView: React.FC<FineListViewProps> = ({
                         {!isPaid && !isWaived && onAdminPay && (
                           <button
                             type="button"
-                            disabled={isSaving} onClick={() => runSave(() => onAdminPay(fine.id))}
-                            className="px-2 py-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-all"
+                            disabled={isSaving || !isFinePaymentOpen(fine)} onClick={() => runSave(() => onAdminPay(fine.id))}
+                            className="disabled:opacity-40 disabled:cursor-not-allowed px-2 py-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-all"
                             title="Merk som betalt"
                           >
                             Betalt
@@ -736,6 +739,7 @@ export const FineListView: React.FC<FineListViewProps> = ({
                         <div className="font-bold text-slate-800">
                           {fine.reason || 'Uspesifisert bot'}
                         </div>
+                        <PaymentAvailability fine={fine} />
                         {isWaived && fine.waivedReason && (
                           <div className="text-[11px] font-semibold text-purple-700 flex items-center gap-1 mt-0.5">
                             <FileX2 size={12} /> Tapsført årsak: "{fine.waivedReason}"
@@ -802,12 +806,13 @@ export const FineListView: React.FC<FineListViewProps> = ({
                         <div className="flex flex-wrap items-center justify-end gap-1.5">
                           {isAdmin && !isPaid && !isWaived && onAdminPay && (
                             <button
+                              disabled={isSaving || !isFinePaymentOpen(fine)}
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void runSave(() => onAdminPay(fine.id));
                               }}
-                              className="px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg transition-all"
+                              className="disabled:opacity-40 disabled:cursor-not-allowed px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg transition-all"
                               title="Merk som betalt med ett klikk"
                             >
                               Merk betalt

@@ -1,3 +1,5 @@
+import { isFinePaymentOpen, canRequestFinePayment } from '../services/paymentService';
+import { PaymentAvailability } from './PaymentAvailability';
 import { useSaveAction } from '../hooks/useSaveAction';
 import { SaveStatus } from './SaveStatus';
 
@@ -170,10 +172,10 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
 
   const handlePayAll = async () => {
     if (isSaving) return;
-    const unpaidFines = fines.filter(f => f.status === 'unpaid' && f.payRequest?.status !== 'pending' && f.complaint?.status !== 'pending');
+    const unpaidFines = fines.filter(f => canRequestFinePayment(f));
     if (unpaidFines.length === 0) return;
 
-    if (confirm(`Vil du sende betalingsbekreftelse for alle ${unpaidFines.length} bøter til botsjefen?`)) {
+    if (confirm(`Vil du sende betalingsbekreftelse for ${unpaidFines.length} ${unpaidFines.length === 1 ? 'bot' : 'bøter'} fra avsluttede måneder (${unpaidFines.reduce((sum, fine) => sum + fine.amount, 0).toLocaleString('nb-NO')} kr) til botsjefen?`)) {
       await runSave(async () => {
         if (onPayAllRequest) return onPayAllRequest(unpaidFines.map(f => f.id));
         for (const fine of unpaidFines) {
@@ -184,7 +186,10 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
     }
   };
 
-  const hasUnpaidFines = fines.some(f => f.status === 'unpaid' && f.payRequest?.status !== 'pending' && f.complaint?.status !== 'pending');
+  const payableFines = fines.filter(f => canRequestFinePayment(f));
+  const hasUnpaidFines = payableFines.length > 0;
+  const payableAmount = payableFines.reduce((sum, fine) => sum + fine.amount, 0);
+  const deferredAmount = fines.filter(f => f.status === 'unpaid' && !isFinePaymentOpen(f)).reduce((sum, fine) => sum + fine.amount, 0);
 
   const [pcFilter, setPcFilter] = useState<'all' | 'unpaid' | 'paid' | 'waived'>('all');
   const [pcSearch, setPcSearch] = useState('');
@@ -204,6 +209,16 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
       return true;
     });
   }, [sortedFines, pcFilter, pcSearch]);
+
+  const paymentSummary = (
+    <div className="rounded-2xl bg-blue-50 border border-blue-100 p-4 text-sm text-slate-700">
+      <div className="flex flex-wrap justify-between gap-2 font-bold">
+        <span>Kan meldes betalt nå: {payableAmount.toLocaleString('nb-NO')} kr</span>
+        <span>Avventer månedsslutt: {deferredAmount.toLocaleString('nb-NO')} kr</span>
+      </div>
+      <p className="mt-1 text-xs">Bøter kan først betales måneden etter hendelsesdatoen. «Meld alle betalt» tar bare med avsluttede måneder.</p>
+    </div>
+  );
 
   return (
     <div className="space-y-6 pb-24 md:pb-12">
@@ -340,10 +355,10 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                                             </span>
                                             <span className="text-[10px] font-black text-green-600">{f.amount} kr</span>
                                         </div>
-                                        <p className="text-xs text-slate-600 mb-3">{f.reason}</p>
+                                        <p className="text-xs text-slate-600 mb-3">{f.reason}</p><PaymentAvailability fine={f} />
                                         <div className="flex gap-2">
                                             <button onClick={() => onUpdateFine({...f, payRequest: { ...f.payRequest!, status: 'rejected' }})} className="flex-1 py-2 bg-white text-red-500 text-[10px] font-black uppercase rounded-lg border border-red-100">Avvis</button>
-                                            <button onClick={() => onAdminPay(f.id)} className="flex-1 py-2 bg-green-500 text-white text-[10px] font-black uppercase rounded-lg">Bekreftet</button>
+                                            <button disabled={!isFinePaymentOpen(f)} onClick={() => onAdminPay(f.id)} className="disabled:opacity-40 disabled:cursor-not-allowed flex-1 py-2 bg-green-500 text-white text-[10px] font-black uppercase rounded-lg">Bekreftet</button>
                                         </div>
                                     </div>
                                 ))
@@ -444,6 +459,8 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
             </button>
         </div>
 
+        {paymentSummary}
+
         {/* Bøteliste for mobil */}
         <div className="px-2">
           <div className="flex items-center justify-between px-1 mb-4">
@@ -479,15 +496,15 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                               <div className="absolute top-4 right-4 flex gap-1.5 z-10">
                                   {currentUserRole === 'admin' ? (
                                       <>
-                                          {!isPaid && !isWaived && <button onClick={(e) => { e.stopPropagation(); onAdminPay(fine.id); }} className="p-2 bg-green-50 hover:bg-green-100 text-green-600 rounded-xl transition-colors shadow-sm"><DollarSign size={16} /></button>}
+                                          {!isPaid && !isWaived && <button disabled={!isFinePaymentOpen(fine)} onClick={(e) => { e.stopPropagation(); onAdminPay(fine.id); }} className="disabled:opacity-40 disabled:cursor-not-allowed p-2 bg-green-50 hover:bg-green-100 text-green-600 rounded-xl transition-colors shadow-sm"><DollarSign size={16} /></button>}
                                           <button onClick={(e) => { e.stopPropagation(); setEditingFine(fine); }} className="p-2 bg-slate-50 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-xl transition-colors shadow-sm"><Pencil size={16} /></button>
                                       </>
                                   ) : (
                                       isOwnProfile && !isPaid && !isWaived && !hasPendingAction && (
                                           <>
                                               <button
-                                                  onClick={(e) => { e.stopPropagation(); onPayRequest(fine.id); }}
-                                                  className="p-2 bg-green-600 text-white rounded-xl transition-all shadow-md active:scale-90"
+                                                  disabled={!isFinePaymentOpen(fine)} onClick={(e) => { e.stopPropagation(); onPayRequest(fine.id); }}
+                                                  className="disabled:opacity-40 disabled:cursor-not-allowed p-2 bg-green-600 text-white rounded-xl transition-all shadow-md active:scale-90"
                                                   title="Marker som betalt"
                                               >
                                                   <DollarSign size={16} />
@@ -517,6 +534,7 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                               <div className="flex justify-between items-end mb-1">
                                   <div>
                                     <div className={`text-sm font-bold pr-2 ${isPaid || isWaived ? 'text-slate-400 line-through opacity-70' : 'text-slate-900'}`}>{fine.reason}</div>
+                                    <PaymentAvailability fine={fine} />
                                     {isWaived && fine.waivedReason && (
                                       <div className="text-[11px] text-purple-600 font-semibold mt-0.5">Tapsført: "{fine.waivedReason}"</div>
                                     )}
@@ -568,11 +586,13 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                 className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-all"
               >
                 <CheckCheck size={16} />
-                <span>Marker alle ({totalDebt} kr) som betalt</span>
+                <span>Meld alle ({payableAmount.toLocaleString('nb-NO')} kr) betalt</span>
               </button>
             )}
           </div>
         </div>
+
+        {paymentSummary}
 
         {/* 2-Kolonner PC Layout */}
         <div className="grid grid-cols-12 gap-6">
@@ -766,7 +786,7 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                               </span>
                               <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">{f.amount} kr</span>
                             </div>
-                            <p className="text-xs text-slate-600">{f.reason}</p>
+                            <p className="text-xs text-slate-600">{f.reason}</p><PaymentAvailability fine={f} />
                           </div>
                           <div className="flex items-center gap-2">
                             <button
@@ -776,8 +796,8 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                               Avvis
                             </button>
                             <button
-                              onClick={() => onAdminPay(f.id)}
-                              className="px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold rounded-lg transition-colors shadow-xs"
+                              disabled={!isFinePaymentOpen(f)} onClick={() => onAdminPay(f.id)}
+                              className="disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold rounded-lg transition-colors shadow-xs"
                             >
                               Bekreft mottatt
                             </button>
@@ -881,6 +901,7 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                               <span className={`font-semibold ${isPaid || isWaived ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
                                 {fine.reason}
                               </span>
+                              <PaymentAvailability fine={fine} />
                               {isWaived && fine.waivedReason && (
                                 <span className="ml-2 text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 font-bold">
                                   Tapsført: {fine.waivedReason}
@@ -916,8 +937,8 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                                   <>
                                     {!isPaid && !isWaived && (
                                       <button
-                                        onClick={() => onAdminPay(fine.id)}
-                                        className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-200"
+                                        disabled={!isFinePaymentOpen(fine)} onClick={() => onAdminPay(fine.id)}
+                                        className="disabled:opacity-40 disabled:cursor-not-allowed p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-200"
                                         title="Merk som betalt"
                                       >
                                         <DollarSign size={15} />
@@ -935,8 +956,8 @@ export const PlayerProfileView: React.FC<PlayerProfileViewProps> = ({
                                   isOwnProfile && !isPaid && !isWaived && !hasPendingAction && (
                                     <>
                                       <button
-                                        onClick={() => onPayRequest(fine.id)}
-                                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-2xs"
+                                        disabled={!isFinePaymentOpen(fine)} onClick={() => onPayRequest(fine.id)}
+                                        className="disabled:opacity-40 disabled:cursor-not-allowed px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-2xs"
                                         title="Send betalingsbekreftelse"
                                       >
                                         Betalt

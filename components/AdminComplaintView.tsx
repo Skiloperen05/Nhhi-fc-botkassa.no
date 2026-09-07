@@ -1,3 +1,5 @@
+import { isFinePaymentOpen } from '../services/paymentService';
+import { PaymentAvailability } from './PaymentAvailability';
 import React from 'react';
 import { FineEntry, Player } from '../types';
 import { Check, X, Gavel, Coins } from 'lucide-react';
@@ -46,6 +48,7 @@ export const AdminComplaintView: React.FC<AdminComplaintViewProps> = ({ fines, p
                         <div className="bg-slate-50 p-3 rounded-lg mb-4 text-sm">
                             <span className="text-slate-500">Gjelder bot: </span>
                             <span className="font-medium text-slate-900">{fine.reason}</span>
+                            <PaymentAvailability fine={fine} />
                         </div>
 
                         <div className="flex gap-2">
@@ -57,8 +60,9 @@ export const AdminComplaintView: React.FC<AdminComplaintViewProps> = ({ fines, p
                                 Avvis
                             </button>
                             <button 
+                                disabled={!isFinePaymentOpen(fine)}
                                 onClick={() => onHandlePayment(fine.id, true)}
-                                className="flex-1 flex items-center justify-center py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition-colors"
+                                className="disabled:opacity-40 disabled:cursor-not-allowed flex-1 flex items-center justify-center py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition-colors"
                             >
                                 <Check size={16} className="mr-2" />
                                 Godkjenn

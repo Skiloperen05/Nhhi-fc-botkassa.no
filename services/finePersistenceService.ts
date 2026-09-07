@@ -1,4 +1,5 @@
 import type { FineEntry } from '../types';
+import { canRequestFinePayment } from './paymentService';
 
 export interface ArchivePersistence {
   saveBulk: (type: 'archive', rows: FineEntry[]) => Promise<boolean>;
@@ -71,7 +72,7 @@ export const preparePaymentRequests = (
       result.missingIds.push(id);
       continue;
     }
-    if (fine.status !== 'unpaid' || fine.payRequest?.status === 'pending' || fine.complaint?.status === 'pending') continue;
+    if (!canRequestFinePayment(fine, new Date(date))) continue;
 
     const updated: FineEntry = { ...fine, payRequest: { status: 'pending', date } };
     if (archivedFine) {

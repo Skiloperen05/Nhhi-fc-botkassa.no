@@ -1,3 +1,4 @@
+import { canSavePaymentState, isFinePaymentOpen, paymentAvailabilityMessage } from '../services/paymentService';
 import { useSaveAction } from '../hooks/useSaveAction';
 import { SaveStatus } from './SaveStatus';
 import React, { useState } from 'react';
@@ -23,9 +24,13 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
   const [waivedReason, setWaivedReason] = useState(fine.waivedReason || 'Ansett som tapt av botsjef');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  const draftFine = { ...fine, status, date: date ? new Date(date + 'T12:00:00').toISOString() : '' };
+  const paymentStateAllowed = canSavePaymentState(draftFine, fine);
+  const paidOptionAllowed = canSavePaymentState({ ...draftFine, status: 'paid' }, fine);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!Number.isFinite(amount) || amount <= 0 || !reason.trim() || !date) return;
+    if (!Number.isFinite(amount) || amount <= 0 || !reason.trim() || !date || !paymentStateAllowed) return;
     await runSave(() => onSave({
       ...fine,
       amount,
@@ -173,6 +178,8 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
             {/* Status (Innkrevingsstatus) */}
             <div className="space-y-1.5 pt-1">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Status / Oppgjør</label>
+                {!isFinePaymentOpen(draftFine) && <p className="text-xs text-slate-500">{paymentAvailabilityMessage(draftFine)}</p>}
+                {!paymentStateAllowed && <p role="alert" className="text-xs text-red-600">Velg ubetalt før du lagrer en bot for en måned som ikke er avsluttet.</p>}
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
@@ -189,8 +196,9 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
 
                   <button
                     type="button"
+                    disabled={!paidOptionAllowed}
                     onClick={() => setStatus('paid')}
-                    className={`py-2 px-2 text-xs font-bold rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                    className={`disabled:opacity-40 disabled:cursor-not-allowed py-2 px-2 text-xs font-bold rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
                       status === 'paid'
                         ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
                         : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -239,7 +247,7 @@ export const EditFineModal: React.FC<EditFineModalProps> = ({ fine, presetFines,
                 <Trash2 size={18} className="mr-2" />
                 Slett
                 </button>
-                <Button type="submit" className="flex-[2] py-2.5 text-sm">
+                <Button type="submit" disabled={!paymentStateAllowed || isSaving} className="flex-[2] py-2.5 text-sm">
                 <Save size={18} className="mr-2" />
                 {isSaving ? 'Lagrer …' : 'Lagre endringer'}
                 </Button>
