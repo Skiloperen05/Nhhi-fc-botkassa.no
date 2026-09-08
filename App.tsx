@@ -547,7 +547,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className={`min-h-screen bg-slate-50 text-slate-900 font-sans ${view === 'add' ? 'h-[100dvh] overflow-hidden md:h-auto md:min-h-screen md:overflow-visible pb-0 md:pb-32 flex flex-col' : 'pb-24'}`}>
+    <div className={`bg-slate-50 text-slate-900 font-sans ${view === 'add' ? 'h-[100dvh] min-h-0 overflow-hidden md:h-auto md:min-h-screen md:overflow-visible pb-0 md:pb-32 flex flex-col' : 'min-h-screen pb-24'}`}>
       {showSuccessToast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
           <CheckCircle2 size={16} className="text-green-400" />
@@ -712,7 +712,7 @@ const App: React.FC = () => {
         </header>
       )}
 
-      <main className={`w-full ${user ? (view === 'add' ? 'flex-1 min-h-0 overflow-hidden md:overflow-visible px-2 pt-1 pb-[4.75rem] md:pb-8 md:p-6 md:max-w-6xl md:mx-auto md:-mt-8 relative z-20 flex flex-col' : 'px-4 max-w-lg md:max-w-6xl mx-auto -mt-10 md:-mt-8 relative z-20') : ''}`}>
+      <main className={`w-full ${user ? (view === 'add' ? 'flex-1 min-h-0 overflow-hidden md:overflow-visible px-2 pt-1 pb-2 md:pb-8 md:p-6 md:max-w-6xl md:mx-auto md:-mt-8 relative z-20 flex flex-col' : 'px-4 max-w-lg md:max-w-6xl mx-auto -mt-10 md:-mt-8 relative z-20') : ''}`}>
         {syncError && <div role="alert" className="mb-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-sm">
           Kunne ikke hente siste oppdatering. Viser sist lagrede data.
           <button disabled={isSaving || isSyncing} onClick={() => void syncFromCloud()} className="ml-2 underline font-semibold">Prøv igjen</button>
@@ -842,7 +842,7 @@ const App: React.FC = () => {
       </main>
 
       {user && (
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-2xl border-t border-slate-200 pb-safe pt-2 z-50">
+        <nav className={`md:hidden ${view === 'add' ? 'relative flex-none' : 'fixed bottom-0 left-0 right-0'} bg-white/80 backdrop-blur-2xl border-t border-slate-200 pb-[env(safe-area-inset-bottom)] pt-2 z-50}`}>
             <div className="flex justify-around items-center max-w-lg mx-auto h-16 px-4">
               {user.role === 'admin' && <button onClick={() => setView('add')} className={`flex flex-col items-center justify-center w-16 h-16 rounded-2xl transition-all ${view === 'add' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><PlusCircle size={22} /><span className="text-[10px] font-black mt-1 uppercase">Gi Bot</span></button>}
               <button onClick={() => setView('overview')} className={`flex flex-col items-center justify-center w-16 h-16 rounded-2xl transition-all ${view === 'overview' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><BarChart3 size={22} /><span className="text-[10px] font-black mt-1 uppercase">Oversikt</span></button>

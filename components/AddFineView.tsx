@@ -282,12 +282,13 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
   );
 
   return (
-    <div className="relative w-full h-full flex-1 min-h-0 flex flex-col">
+    <div className="relative w-full flex-1 min-h-0 flex flex-col">
       {saveError && <p role="alert" className="fixed top-3 left-4 right-4 z-[100] bg-red-600 text-white p-3 rounded-xl text-sm">{saveError}</p>}
       {/* ========================================================================= */}
       {/* 📱 MOBILVISNING (md:hidden): Fyller skjermen dynamisk fra topp til tå       */}
       {/* ========================================================================= */}
-      <div className="md:hidden flex-1 min-h-0 h-full flex flex-col gap-2 overflow-hidden select-none">
+      <div className="md:hidden flex-1 min-h-0 flex flex-col gap-2 overflow-hidden select-none">
+        <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto overscroll-contain">
         {/* 1 · BOTEN CARD (Litt større og behagelig trykkflate) */}
         <div className="flex-none bg-white border border-slate-200/80 rounded-2xl p-2.5 shadow-2xs">
           <div className="flex items-center justify-between mb-1.5">
@@ -377,7 +378,7 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
         </div>
 
         {/* 2 · SYNDERE CARD (Dynamisk og fleksibel: fyller all ledig plass i høyden) */}
-        <div className="flex-1 min-h-0 bg-white border border-slate-200/80 rounded-2xl p-2.5 shadow-2xs flex flex-col gap-1.5">
+        <div className="flex-1 min-h-[140px] bg-white border border-slate-200/80 rounded-2xl p-2.5 shadow-2xs flex flex-col gap-1.5">
           <div className="flex items-center justify-between flex-none">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-black tracking-wider uppercase text-slate-400">
@@ -564,7 +565,9 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
           </div>
         </div>
 
-        {/* 4 · STICKY CTA BUTTON */}
+        </div>
+
+        {/* Kept outside the scrolling fields so submission stays visible. */}
         <div className="flex-none pt-0.5">
           <button
             type="button"
@@ -959,7 +962,8 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
             className="flex-1 cursor-pointer"
             onClick={() => { if (!isSubmitting) setIsConfirmSheetOpen(false); }}
           />
-          <div className="bg-white rounded-t-3xl p-6 shadow-2xl border-t border-slate-200 max-w-lg mx-auto w-full max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom duration-200">
+          <div className="bg-white rounded-t-3xl p-6 shadow-2xl border-t border-slate-200 max-w-lg mx-auto w-full max-h-[85dvh] flex flex-col animate-in slide-in-from-bottom duration-200">
+            <div className="min-h-0 overflow-y-auto overscroll-contain">
             {saveError && <p role="alert" className="text-red-600 text-sm mb-3">{saveError}</p>}
             <div className="w-12 h-1 bg-slate-300 rounded-full mx-auto mb-4" />
 
@@ -1016,8 +1020,10 @@ export const AddFineView: React.FC<AddFineViewProps> = ({
               </div>
             )}
 
-            {/* Action buttons */}
-            <div className="flex gap-3 mt-6">
+            </div>
+
+            {/* Action buttons stay visible even with a long note or many players. */}
+            <div className="flex-none flex gap-3 mt-4 pb-[env(safe-area-inset-bottom)]">
               <button
                 type="button"
                 onClick={() => { if (!isSubmitting) setIsConfirmSheetOpen(false); }}
