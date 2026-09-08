@@ -842,7 +842,7 @@ const App: React.FC = () => {
       </main>
 
       {user && (
-        <nav className={`md:hidden ${view === 'add' ? 'relative flex-none' : 'fixed bottom-0 left-0 right-0'} bg-white/80 backdrop-blur-2xl border-t border-slate-200 pb-[env(safe-area-inset-bottom)] pt-2 z-50}`}>
+        <nav className={`md:hidden ${view === 'add' ? 'relative flex-none' : 'fixed bottom-0 left-0 right-0'} bg-white/80 backdrop-blur-2xl border-t border-slate-200 pb-[env(safe-area-inset-bottom)] pt-2 z-50`}>
             <div className="flex justify-around items-center max-w-lg mx-auto h-16 px-4">
               {user.role === 'admin' && <button onClick={() => setView('add')} className={`flex flex-col items-center justify-center w-16 h-16 rounded-2xl transition-all ${view === 'add' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><PlusCircle size={22} /><span className="text-[10px] font-black mt-1 uppercase">Gi Bot</span></button>}
               <button onClick={() => setView('overview')} className={`flex flex-col items-center justify-center w-16 h-16 rounded-2xl transition-all ${view === 'overview' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><BarChart3 size={22} /><span className="text-[10px] font-black mt-1 uppercase">Oversikt</span></button>
